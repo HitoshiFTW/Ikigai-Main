@@ -107,7 +107,7 @@ class HolographicMemory:
         self._v_toks  = {}   # name -> value token list
         self._order   = []   # insertion order
 
-    # ── store ──────────────────────────────────────────────────────────────
+    #  store
 
     def store(self, name, key_tokens, value_tokens):
         """
@@ -134,7 +134,7 @@ class HolographicMemory:
         self._k_toks[name] = list(key_tokens)
         self._v_toks[name] = list(value_tokens)
 
-    # ── recall ────────────────────────────────────────────────────────────
+    #  recall
 
     def _score(self, q_hv):
         """
@@ -179,7 +179,7 @@ class HolographicMemory:
         score  = scores.get(name, 0.0) / self.d
         return self._v_toks[name], float(score)
 
-    # ── metrics ───────────────────────────────────────────────────────────
+    #  metrics
 
     @property
     def n_stored(self):
@@ -198,7 +198,7 @@ class HolographicMemory:
         """Test recall for every stored name. Returns {name: sim}."""
         return {name: self.recall_exact(name)[1] for name in self._order}
 
-    # ── introspection ─────────────────────────────────────────────────────
+    #  introspection
 
     def key_tokens(self, name):
         return list(self._k_toks.get(name, []))

@@ -113,7 +113,7 @@ class ImportanceDecayLattice:
         self._items       = {}    # name -> DecayItem
         self._tick        = 0
 
-    # ── record / refresh ──────────────────────────────────────────────────
+    #  record / refresh
 
     def record(self, name, tokens, surprise=0.0, now=None):
         """Insert or refresh. Subsequent calls: freq++, surprise EMA-merge."""
@@ -137,7 +137,7 @@ class ImportanceDecayLattice:
         self._tick += int(n)
         return self._tick
 
-    # ── strength + ranking ────────────────────────────────────────────────
+    #  strength + ranking
 
     def strength(self, name, now=None):
         if now is None:
@@ -156,7 +156,7 @@ class ImportanceDecayLattice:
             results = results[:top_k]
         return results
 
-    # ── pruning ───────────────────────────────────────────────────────────
+    #  pruning
 
     def prune(self, now=None, threshold=0.1):
         """Drop items below strength threshold. Returns list of pruned names."""
@@ -169,7 +169,7 @@ class ImportanceDecayLattice:
                 del self._items[name]
         return pruned
 
-    # ── introspection ─────────────────────────────────────────────────────
+    #  introspection
 
     def half_lives(self):
         return {

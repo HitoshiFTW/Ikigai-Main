@@ -34,7 +34,7 @@ class NoForgettingProof:
         self.smr        = smr   # optional SelfModifyingRefiner for I3/I4
         self._snapshots = []
 
-    # ── snapshot ──────────────────────────────────────────────────────────
+    #  snapshot
 
     def snapshot(self):
         """Capture current monotone state. Returns snapshot dict."""
@@ -60,7 +60,7 @@ class NoForgettingProof:
         self._snapshots.append(snap)
         return snap
 
-    # ── verification ──────────────────────────────────────────────────────
+    #  verification
 
     def verify_monotone(self):
         """
@@ -105,7 +105,7 @@ class NoForgettingProof:
 
         return violations
 
-    # ── metrics ───────────────────────────────────────────────────────────
+    #  metrics
 
     def n_snapshots(self):
         return len(self._snapshots)
@@ -113,7 +113,7 @@ class NoForgettingProof:
     def n_checks(self):
         return max(0, len(self._snapshots) - 1) * 5
 
-    # ── report ────────────────────────────────────────────────────────────
+    #  report
 
     def report(self):
         violations = self.verify_monotone()

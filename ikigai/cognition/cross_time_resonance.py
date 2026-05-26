@@ -79,7 +79,7 @@ class CrossTimeResonator:
         self._buffers = [{} for _ in periods]
         self._resonance_log = []
 
-    # ── phase geometry ────────────────────────────────────────────────────
+    #  phase geometry
 
     def phase(self, osc_idx, tick=None):
         """Phase in [0, 2*pi) for oscillator i at given tick."""
@@ -118,7 +118,7 @@ class CrossTimeResonator:
                 m[i, j] = self.beat_strength(i, j, tick)
         return m
 
-    # ── encode ────────────────────────────────────────────────────────────
+    #  encode
 
     def encode(self, name, tokens, tick=None):
         """
@@ -135,7 +135,7 @@ class CrossTimeResonator:
             self._buffers[i][b].append((tick, name, list(tokens), hv))
         return hv
 
-    # ── resonance detection ───────────────────────────────────────────────
+    #  resonance detection
 
     def detect_resonance(self, tick=None, threshold=0.85):
         """
@@ -157,7 +157,7 @@ class CrossTimeResonator:
         return [t for t in range(n_ticks)
                 if self.beat_strength(i, j, t) >= threshold]
 
-    # ── recall + replay ───────────────────────────────────────────────────
+    #  recall + replay
 
     def recall_near_phase(self, osc_idx, tick=None, top_k=3):
         """
@@ -194,14 +194,14 @@ class CrossTimeResonator:
             self._resonance_log.append((tick, result))
         return result
 
-    # ── tick advance ──────────────────────────────────────────────────────
+    #  tick advance
 
     def advance(self, n=1):
         """Advance internal tick counter by n steps. Returns new tick."""
         self._tick += n
         return self._tick
 
-    # ── introspection ─────────────────────────────────────────────────────
+    #  introspection
 
     @property
     def tick(self):

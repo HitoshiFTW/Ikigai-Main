@@ -17,7 +17,7 @@ Backward chaining: try direct fact, then unify head of each rule with goal,
                    recursively prove body. Depth-limited to prevent loops.
 
 No forgetting: fact counts monotone non-decreasing.
-               assert_fact(s,p,o) twice → count=2, never erased.
+               assert_fact(s,p,o) twice -> count=2, never erased.
 
 vs LLM: LLM factual knowledge = frozen at pretraining.
         WorldModel: grows from every conversation turn.
@@ -35,7 +35,7 @@ def _is_var(token):
 
 
 def _rename_rule(head, body):
-    """Fresh variable names per rule invocation — prevents cross-invocation binding conflicts."""
+    """Fresh variable names per rule invocation -- prevents cross-invocation binding conflicts."""
     _rule_counter[0] += 1
     sfx = f'__{_rule_counter[0]}'
     def r(triple):
@@ -82,7 +82,7 @@ class SymbolicWorldModel:
         self._facts = {}   # (s, p, o) -> int count (monotone)
         self._rules = []   # [(head_triple, [body_triples]), ...]
 
-    # ── facts ─────────────────────────────────────────────────────────────
+    #  facts
 
     def assert_fact(self, s, p, o):
         """Monotone assert. Returns new count."""
@@ -115,11 +115,11 @@ class SymbolicWorldModel:
     def fact_exists(self, s, p, o):
         return (str(s), str(p), str(o)) in self._facts
 
-    # ── rules ─────────────────────────────────────────────────────────────
+    #  rules
 
     def add_rule(self, head, body):
         """
-        head: (s, p, o) template — uppercase tokens = variables.
+        head: (s, p, o) template -- uppercase tokens = variables.
         body: list of (s, p, o) templates sharing variables with head.
 
         Example (transitivity):
@@ -127,7 +127,7 @@ class SymbolicWorldModel:
         """
         self._rules.append((tuple(head), [tuple(b) for b in body]))
 
-    # ── inference ─────────────────────────────────────────────────────────
+    #  inference
 
     def _prove(self, goals, bindings, depth, seen):
         """
@@ -183,12 +183,12 @@ class SymbolicWorldModel:
     def query_inferred(self, s=None, p=None, o=None, depth=3):
         """
         Return facts provable (directly or via rules) matching pattern.
-        More expensive than query() — uses infer() per candidate.
+        More expensive than query() -- uses infer() per candidate.
         """
         direct = self.query(s, p, o)
         return direct  # direct for now; infer() used for specific goals
 
-    # ── learning from conversation ─────────────────────────────────────────
+    #  learning from conversation
 
     def learn_from_tokens(self, tokens, role='subject'):
         """
@@ -201,7 +201,7 @@ class SymbolicWorldModel:
             added += 1
         return added
 
-    # ── stats ─────────────────────────────────────────────────────────────
+    #  stats
 
     def fact_count(self, s=None, p=None, o=None):
         return len(self.query(s, p, o))

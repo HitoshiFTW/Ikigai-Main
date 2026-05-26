@@ -38,7 +38,7 @@ _log(f'  organism: substrate={sub0/1_048_576:.0f} MB FIXED')
 
 check('V1 reason_chain method wired', hasattr(org, 'reason_chain'))
 
-# ── Build a small knowledge graph ────────────────────────────────────────────
+#  Build a small knowledge graph
 # Roles: isa, lives_in, contains, has, property
 # Need to register custom roles (not all in DEFAULT_ROLES)
 for r in ('lives_in', 'contains', 'has'):
@@ -69,20 +69,20 @@ INSIDE = ['river','cloud','rock','tree']
 THING  = ['water','rain','fire','wind']
 PROP   = ['cold','wet','warm','dry']
 
-# ── V2: 2-hop ────────────────────────────────────────────────────────────────
+#  V2: 2-hop
 _log('\n--- 2-hop: cat -> isa -> lives_in ---')
 p = org.reason_chain('cat', [('isa', HYPER), ('lives_in', PLACE)])
 _log(f'  path: {" -> ".join(map(str,p))}')
 check('V2 2-hop cat -> mammal -> forest', p == ['cat','mammal','forest'], f'{p}')
 
-# ── V3: 3-hop ────────────────────────────────────────────────────────────────
+#  V3: 3-hop
 _log('\n--- 3-hop: cat -> isa -> lives_in -> contains ---')
 p = org.reason_chain('cat', [('isa', HYPER), ('lives_in', PLACE), ('contains', INSIDE)])
 _log(f'  path: {" -> ".join(map(str,p))}')
 check('V3 3-hop cat -> mammal -> forest -> river',
       p == ['cat','mammal','forest','river'], f'{p}')
 
-# ── V4: 4-hop ────────────────────────────────────────────────────────────────
+#  V4: 4-hop
 _log('\n--- 4-hop: ... -> has ---')
 p = org.reason_chain('cat', [('isa', HYPER), ('lives_in', PLACE),
                               ('contains', INSIDE), ('has', THING)])
@@ -90,7 +90,7 @@ _log(f'  path: {" -> ".join(map(str,p))}')
 check('V4 4-hop cat -> mammal -> forest -> river -> water',
       p == ['cat','mammal','forest','river','water'], f'{p}')
 
-# ── V5: 5-hop ────────────────────────────────────────────────────────────────
+#  V5: 5-hop
 _log('\n--- 5-hop: ... -> property ---')
 p = org.reason_chain('cat', [('isa', HYPER), ('lives_in', PLACE),
                               ('contains', INSIDE), ('has', THING),
@@ -99,7 +99,7 @@ _log(f'  path: {" -> ".join(map(str,p))}')
 check('V5 5-hop cat -> ... -> cold',
       p == ['cat','mammal','forest','river','water','cold'], f'{p}')
 
-# ── V6: distractor flood, chain survives ─────────────────────────────────────
+#  V6: distractor flood, chain survives
 _log('\n--- Distractor flood + retry 5-hop ---')
 DISTR = [('flomp','isa','xyz'),('zarb','isa','xyz'),('mibvor','isa','xyz')] * 7
 for hypo, role, tgt in DISTR:
@@ -111,11 +111,11 @@ _log(f'  after +21 distractors: {" -> ".join(map(str,p_after))}')
 check('V6 multi-hop survives distractor flood',
       p_after == ['cat','mammal','forest','river','water','cold'], f'{p_after}')
 
-# ── V7: substrate flat ───────────────────────────────────────────────────────
+#  V7: substrate flat
 sub1 = org.unified.substrate_bytes()
 check('V7 substrate FIXED throughout', sub1 == sub0, f'{sub0} -> {sub1}')
 
-# ── V8: alternate start dog -> same destination ──────────────────────────────
+#  V8: alternate start dog -> same destination
 _log('\n--- Alternate start: dog (also a mammal) ---')
 p_dog = org.reason_chain('dog', [('isa', HYPER), ('lives_in', PLACE),
                                   ('contains', INSIDE), ('has', THING),
@@ -131,7 +131,7 @@ p_eagle = org.reason_chain('eagle', [('isa', HYPER), ('lives_in', PLACE),
                                       ('property', PROP)])
 _log(f'  eagle path: {" -> ".join(map(str,p_eagle))}')
 
-# ── summary ──────────────────────────────────────────────────────────────────
+#  summary
 total = PASS + FAIL
 _log(f'\n{"="*64}')
 _log(f'Pack 133b -- Multi-hop reasoning')

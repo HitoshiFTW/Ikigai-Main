@@ -78,7 +78,7 @@ def _and_like(a, b):
     return np.where((a > 0) & (b > 0), 1.0, -1.0).astype(np.float32)
 
 
-# ── property checks ───────────────────────────────────────────────────────
+#  property checks
 
 def is_commutative(op, n_trials=10, d=64, seed=0):
     rng = np.random.default_rng(seed)
@@ -150,7 +150,7 @@ def distributes_over_bundle(op, n_trials=10, d=64, seed=4):
     return True
 
 
-# ── closure discovery ─────────────────────────────────────────────────────
+#  closure discovery
 
 class AlgebraicClosure:
     """

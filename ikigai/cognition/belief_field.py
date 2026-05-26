@@ -88,7 +88,7 @@ class BeliefField:
         self._heal_log   = []   # list of {step, pair, pre_sim, post_sim}
         self._step       = 0
 
-    # ── assertion ─────────────────────────────────────────────────────────
+    #  assertion
 
     def assert_belief(self, name, tokens):
         """Assert belief: tokens encode a proposition held as true."""
@@ -109,7 +109,7 @@ class BeliefField:
         """Effective belief HV = raw_hv * polarity."""
         return self._beliefs[name] * self._polarities[name]
 
-    # ── conflict detection ────────────────────────────────────────────────
+    #  conflict detection
 
     def similarity(self, name_a, name_b):
         """Cosine between effective HVs."""
@@ -150,7 +150,7 @@ class BeliefField:
                     result.append((names[i], names[j], sim))
         return result
 
-    # ── healing ───────────────────────────────────────────────────────────
+    #  healing
 
     def heal(self, name_a, name_b):
         """
@@ -207,7 +207,7 @@ class BeliefField:
         return {'healed_pairs': healed_total, 'rounds': max_rounds,
                 'final_conflicts': self.n_conflicts()}
 
-    # ── field metrics ─────────────────────────────────────────────────────
+    #  field metrics
 
     def field_consistency(self):
         """Mean pairwise cosine across all asserted beliefs."""
@@ -244,7 +244,7 @@ class BeliefField:
             result /= len(pairs)
         return result
 
-    # ── introspection ─────────────────────────────────────────────────────
+    #  introspection
 
     @property
     def n_beliefs(self):

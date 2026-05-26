@@ -1,7 +1,7 @@
 """
 ikigai.cognition.self_modifying_refiner -- Self-Modifying Schema Cognition.
 
-Day 55 Pack 52 -- ★5 Decisive stack: runtime schema rewriting.
+Day 55 Pack 52 -- *5 Decisive stack: runtime schema rewriting.
 
 Problem: SchemaRefiner accumulates positive examples but schema never changes.
          SLOTs stay SLOTs forever even if every use fills them identically.
@@ -110,7 +110,7 @@ class SelfModifyingRefiner(SchemaRefiner):
         self._sms   = {}   # name -> SelfModifyingSchema (may be stale)
         self._fills = {}   # name -> {slot_idx -> Counter}
 
-    # ── SelfModifyingSchema cache ─────────────────────────────────────────
+    #  SelfModifyingSchema cache
 
     def _get_sms(self, name):
         """Get (or rebuild) SelfModifyingSchema for name."""
@@ -129,7 +129,7 @@ class SelfModifyingRefiner(SchemaRefiner):
             self._sms[name] = sms
         return self._sms[name]
 
-    # ── fill extraction ───────────────────────────────────────────────────
+    #  fill extraction
 
     def _record_fills(self, name, tokens):
         """Extract slot fills from generated tokens aligned to schema."""
@@ -146,7 +146,7 @@ class SelfModifyingRefiner(SchemaRefiner):
                 self._fills[name][idx] = Counter()
             self._fills[name][idx][tok] += 1
 
-    # ── override feedback to capture fills ────────────────────────────────
+    #  override feedback to capture fills
 
     def feedback(self, name, tokens, positive):
         conf = super().feedback(name, tokens, positive)
@@ -160,7 +160,7 @@ class SelfModifyingRefiner(SchemaRefiner):
             self._record_fills(name, tokens)
         return conf, score
 
-    # ── promotion ─────────────────────────────────────────────────────────
+    #  promotion
 
     def promote_check(self, name):
         """
@@ -186,7 +186,7 @@ class SelfModifyingRefiner(SchemaRefiner):
         """Check and apply promotions for all patterns."""
         return {name: self.promote_check(name) for name in self.inducer._examples}
 
-    # ── self-modifying application ────────────────────────────────────────
+    #  self-modifying application
 
     def self_modifying_apply(self, name, *args):
         """
@@ -199,7 +199,7 @@ class SelfModifyingRefiner(SchemaRefiner):
             return self.inducer.apply(name, *args)
         return sms.apply(list(args))
 
-    # ── stats ─────────────────────────────────────────────────────────────
+    #  stats
 
     def n_promotions(self, name):
         sms = self._sms.get(name)

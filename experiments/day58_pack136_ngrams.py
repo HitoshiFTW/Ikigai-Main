@@ -44,7 +44,7 @@ def _log(s): print(s, flush=True)
 
 _log('=== Pack 136: Trigram + 4-gram channels ===\n')
 
-# ── train: same corpus as Pack 135 so we can compare apples-to-apples ────────
+#  train: same corpus as Pack 135 so we can compare apples-to-apples
 org = IkigaiOrganism(flat_only=True)
 TEXT = [
     "the cat sat on the mat and watched the rain",
@@ -75,27 +75,27 @@ sub_after = org.unified.substrate_bytes()
 _log(f'  trained in {elapsed:.1f}s. RSS={rss():.0f} MB  '
      f'substrate={sub_after/1_048_576:.0f} MB')
 
-# ── V5 substrate stays fixed despite trigram+4gram writes ────────────────────
+#  V5 substrate stays fixed despite trigram+4gram writes
 check('V5 substrate FIXED after 3 n-gram channels',
       sub_after == sub_before,
       f'{sub_before} -> {sub_after}')
 
-# ── V1 bigram back-compat: single-string call still works ────────────────────
+#  V1 bigram back-compat: single-string call still works
 bi = org.unified.next_word_candidates('the', top_k=5)
 _log(f'\n  V1 bigram next("the"): {[(w, round(s,3)) for w,s in bi[:5]]}')
 check('V1 bigram single-str input still works', len(bi) > 0)
 
-# ── V2 trigram channel populated ─────────────────────────────────────────────
+#  V2 trigram channel populated
 tri_targets = org.unified._role_targets.get('next2', set())
 _log(f'  V2 trigram seen-prevs: {len(tri_targets)} unique first-tokens')
 check('V2 trigram channel populated', len(tri_targets) > 0)
 
-# ── V3 4-gram channel populated ──────────────────────────────────────────────
+#  V3 4-gram channel populated
 four_targets = org.unified._role_targets.get('next3', set())
 _log(f'  V3 4-gram  seen-prevs: {len(four_targets)} unique first-tokens')
 check('V3 4-gram channel populated', len(four_targets) > 0)
 
-# ── V4 combined scoring returns ranked candidates ────────────────────────────
+#  V4 combined scoring returns ranked candidates
 combo = org.unified.combined_ngram_candidates(
     ['on', 'the'], top_k=10, weights=(0.2, 0.4, 0.4))
 _log(f'  V4 combined after ["on","the"]: '
@@ -103,7 +103,7 @@ _log(f'  V4 combined after ["on","the"]: '
 check('V4 combined_ngram_candidates returns ranked list',
       isinstance(combo, list) and len(combo) > 0)
 
-# ── V8 exact-trigram lookup recovers trained next token ──────────────────────
+#  V8 exact-trigram lookup recovers trained next token
 #   Train corpus has "sat on the mat" and "sat on the throne" / "fell ... on
 #   the green grass" / "on the road" / "on the calm blue sea". Top trigram
 #   candidate after ("on","the") should be one of {mat, throne, grass,
@@ -117,7 +117,7 @@ check('V8 trigram top is a trained continuation',
       top_tri_word in TRAINED_AFTER_ON_THE,
       f'got: {top_tri_word}')
 
-# ── V6 trigram cogitate output differs from bigram-only ──────────────────────
+#  V6 trigram cogitate output differs from bigram-only
 out_bi = org.cogitate('the cat sat', max_tokens=25, seed=0,
                       ngram_weights=(1.0, 0.0, 0.0))     # bigram only
 out_tri = org.cogitate('the cat sat', max_tokens=25, seed=0,
@@ -130,7 +130,7 @@ _log(f'  V6 4gram-heavy:  "{out_4}"')
 check('V6 trigram backoff produces different output from bigram-only',
       out_bi != out_tri or out_bi != out_4)
 
-# ── V7 RAM constant at long generation with all 3 channels ───────────────────
+#  V7 RAM constant at long generation with all 3 channels
 _log('\n  Scaling generation length (constant RAM claim, 3 channels)...')
 results = []
 sub_pre = org.unified.substrate_bytes()
@@ -151,7 +151,7 @@ check('V7 substrate FIXED at long generation with 3 channels',
       sub_post == sub_pre,
       f'{sub_pre} -> {sub_post}')
 
-# ── coherence inspection (qualitative, not a hard check) ─────────────────────
+#  coherence inspection (qualitative, not a hard check)
 def repeat_ratio(text):
     toks = text.split()
     if len(toks) < 4: return 0.0
@@ -163,7 +163,7 @@ _log(f'    bigram-only:  {repeat_ratio(out_bi):.3f}')
 _log(f'    trigram-mix:  {repeat_ratio(out_tri):.3f}')
 _log(f'    4gram-heavy:  {repeat_ratio(out_4):.3f}')
 
-# ── summary ──────────────────────────────────────────────────────────────────
+#  summary
 total = PASS + FAIL
 _log(f'\n{"="*64}')
 _log(f'Pack 136 -- Trigram + 4-gram channels')

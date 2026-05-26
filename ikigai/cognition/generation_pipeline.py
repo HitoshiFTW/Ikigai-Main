@@ -71,7 +71,7 @@ class GenerationPipeline:
         self.mirror   = MetacognitiveHVMirror(d=d_verify, drift_threshold=drift_threshold)
         self._run_log = []
 
-    # ── registration ─────────────────────────────────────────────────────
+    #  registration
 
     def register(self, name, intent_tokens, proc_tokens, schema_examples):
         """Register skill in both binder and refiner."""
@@ -79,7 +79,7 @@ class GenerationPipeline:
         self.refiner.observe_many(name, schema_examples)
         return name
 
-    # ── pipeline execution ────────────────────────────────────────────────
+    #  pipeline execution
 
     def run(self, query_tokens, B_U, *slot_args):
         """
@@ -117,7 +117,7 @@ class GenerationPipeline:
         """
         return [self.run(q[0], q[1], *q[2:]) for q in queries]
 
-    # ── pipeline state ────────────────────────────────────────────────────
+    #  pipeline state
 
     @property
     def n_registered(self):

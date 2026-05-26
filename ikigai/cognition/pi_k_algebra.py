@@ -4,7 +4,7 @@ ikigai.cognition.pi_k_algebra -- Π_k Prime-Offset Permutation Family.
 Day 56 Pack 85 -- Pillar 2 of UHE.
 
 Solves the bipolar-XOR-leakage problem (Pack 72 lesson):
-    XOR is involutive → in chains s_0 → s_1 → ... → s_n, predict(s_k, action)
+    XOR is involutive -> in chains s_0 -> s_1 -> ... -> s_n, predict(s_k, action)
     leaks BOTH s_{k+1} AND s_{k-1}.
 
 Solution: family of cyclic-shift permutations indexed by primes.
@@ -12,7 +12,7 @@ Solution: family of cyclic-shift permutations indexed by primes.
     Not involutive: Π_k(Π_k(x)) = roll(x, 2*p_k) ≠ x in general
     Non-commutative: Π_j ∘ Π_k = roll(., p_j + p_k) ≠ Π_k ∘ Π_j (sequence matters)
     Reversible: Π_k^{-1}(x) = np.roll(x, -p_k)
-    Coprime stack: gcd(p_1, p_2, ..., p_K) = 1 → 32-depth chains have full state separation
+    Coprime stack: gcd(p_1, p_2, ..., p_K) = 1 -> 32-depth chains have full state separation
 
 Π-binding:
     bind_Π_k(a, b) = Π_k(a) * b      (asymmetric)
@@ -107,7 +107,7 @@ class PiK:
             result = self.unbind(i, result, items_minus_first[i])
         return result
 
-    # ── Turing-style state machine on top ────────────────────────────────
+    #  Turing-style state machine on top
 
     def stamp(self, hv, role_k):
         """Mark hv with role index. role_k determines which Π applies."""

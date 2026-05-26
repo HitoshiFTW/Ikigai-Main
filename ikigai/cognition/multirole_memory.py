@@ -89,7 +89,7 @@ class MultiRoleMemory:
     def _bank(self, role):
         return self.sdm if role in self.DENSE_ROLES else self.sdm_rel
 
-    # ── binding ──────────────────────────────────────────────────────────
+    #  binding
     def _bind(self, a, r):
         return (a * r).astype(np.complex64)
 
@@ -102,7 +102,7 @@ class MultiRoleMemory:
     def _slot(self, word, role):
         return f'{word}\x00{role}'        # loc-cache key
 
-    # ── writing ──────────────────────────────────────────────────────────
+    #  writing
     def write_relation(self, word, role, value_hv):
         self._bank(role).write(self._addr(word, role),
                                np.asarray(value_hv, dtype=np.complex64),
@@ -149,7 +149,7 @@ class MultiRoleMemory:
         self._dirty = True
         return n
 
-    # ── Channel 2 (verb rotor) on flat memory ──────────────────────────────
+    #  Channel 2 (verb rotor) on flat memory
     def _encode_scalar(self, c):
         """Scalar c -> phasor: phase = c * omega * q_axis (per component)."""
         phase = float(c) * self.q_omega * self.q_axis
@@ -306,7 +306,7 @@ class MultiRoleMemory:
         ranked = sorted(scores.items(), key=lambda kv: -kv[1])
         return ranked[:top_k]
 
-    # ── reading ──────────────────────────────────────────────────────────
+    #  reading
     def recall(self, word, role):
         return self._bank(role).read(self._addr(word, role),
                                      word=self._slot(word, role))
@@ -347,7 +347,7 @@ class MultiRoleMemory:
             cur = nxt
         return path
 
-    # ── co-occurrence similarity (mean-removed, Channel 1 in shared bank) ───
+    #  co-occurrence similarity (mean-removed, Channel 1 in shared bank)
     def _refresh_dirs(self):
         if not self._dirty and self._dirs is not None:
             return
@@ -377,7 +377,7 @@ class MultiRoleMemory:
             return None
         return _cos(self.cooccur_recall(w1), self.cooccur_recall(w2), self.d)
 
-    # ── introspection ───────────────────────────────────────────────────────
+    #  introspection
     def substrate_bytes(self):
         return self.sdm.substrate_bytes() + self.sdm_rel.substrate_bytes()
 

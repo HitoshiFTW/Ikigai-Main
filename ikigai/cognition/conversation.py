@@ -1,5 +1,5 @@
 """
-ikigai.cognition.conversation — General-purpose conversational pipeline.
+ikigai.cognition.conversation -- General-purpose conversational pipeline.
 
 Binary routing: code queries -> CodeAlpaca kNN, everything else -> General corpus kNN.
 No synthetic domain data. Responses come from real corpus retrieval + local n-gram.
@@ -150,7 +150,7 @@ def _generate(bg, tg, q_context, seed=None, max_len=25, thresh=2):
 
 
 # ---------------------------------------------------------------------------
-# IntentRouter — binary: code vs general
+# IntentRouter -- binary: code vs general
 # ---------------------------------------------------------------------------
 class IntentRouter:
     """
@@ -222,7 +222,7 @@ class IntentRouter:
 
 
 # ---------------------------------------------------------------------------
-# EpisodicBuffer — conversation history shifts retrieval
+# EpisodicBuffer -- conversation history shifts retrieval
 # ---------------------------------------------------------------------------
 class EpisodicBuffer:
     """
@@ -273,7 +273,7 @@ class EpisodicBuffer:
 
 
 # ---------------------------------------------------------------------------
-# Conversation — the full pipeline
+# Conversation -- the full pipeline
 # ---------------------------------------------------------------------------
 class Conversation:
     """
@@ -375,7 +375,7 @@ class Conversation:
 
 
 # ---------------------------------------------------------------------------
-# Builder — loads corpora, builds HV matrices, wires everything
+# Builder -- loads corpora, builds HV matrices, wires everything
 # ---------------------------------------------------------------------------
 def build_conversation(ctx, code_corpus_path, general_corpus_path,
                        max_code=None, max_gen=None,

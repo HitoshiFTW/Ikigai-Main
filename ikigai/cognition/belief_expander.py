@@ -77,7 +77,7 @@ class BeliefConditionedExpander(NGramExpander):
         Expand seed via belief-steered n-gram.
 
         Selection criterion: cosine(word_hv(candidate), B_U).
-        O(d * top_k) per step — independent of result length.
+        O(d * top_k) per step -- independent of result length.
         Falls back to base expand() if n-gram is empty.
         """
         if not self._counts:
@@ -109,7 +109,7 @@ class BeliefConditionedExpander(NGramExpander):
 
             argmax_word = candidates[0][0]
 
-            # Belief-score: cosine(word_hv(candidate), B_U) — O(d) per candidate
+            # Belief-score: cosine(word_hv(candidate), B_U) -- O(d) per candidate
             best_word  = None
             best_score = -2.0
             for word, _ in candidates:

@@ -89,7 +89,7 @@ class GenerationEngine:
         self.history = []
         self._rng = random.Random()
 
-    # ── initialization ────────────────────────────────────────────────────
+    #  initialization
     def _init_thought(self, prompt_tokens):
         d = self.org.unified.d
         if not prompt_tokens:
@@ -100,7 +100,7 @@ class GenerationEngine:
             accum = accum + self.org.unified.ck.key(t)
         self.thought = _renorm(accum)
 
-    # ── one think step: thought-state walks the substrate ─────────────────
+    #  one think step: thought-state walks the substrate
     def think_step(self):
         ROLE = self.org.unified.roles['cooccur']
         addr = (self.thought * ROLE).astype(np.complex64)
@@ -109,7 +109,7 @@ class GenerationEngine:
             self.momentum * self.thought + (1.0 - self.momentum) * resp)
         self.thought_trace.append(self.thought.copy())
 
-    # ── one speak step: n-gram-combined + thought-aligned softmax ──────────
+    #  one speak step: n-gram-combined + thought-aligned softmax
     def speak_step(self, last_token):
         ctx = self.history[-self.ngram_ctx:] if self.history else [last_token]
         unified = self.org.unified
@@ -140,7 +140,7 @@ class GenerationEngine:
         idx = self._rng.choices(range(len(scores)), weights=probs)[0]
         return scores[idx][0]
 
-    # ── primary interface ──────────────────────────────────────────────────
+    #  primary interface
     def generate(self, prompt='', max_tokens=100, return_trace=False, seed=None):
         if seed is not None:
             self._rng.seed(seed)
@@ -161,7 +161,7 @@ class GenerationEngine:
             return out, self.thought_trace
         return out
 
-    # ── inject new knowledge mid-generation ──────────────────────────────
+    #  inject new knowledge mid-generation
     def inject_fact(self, hypo, role, target, n=20):
         """Online learning during generation. Subsequent tokens see this fact."""
         self.org.unified.assert_relation(hypo, role, target) if hasattr(

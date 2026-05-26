@@ -92,7 +92,7 @@ class UnifiedOrganism:
         self._safety_blocks = 0
         self._history       = []   # list of trace dicts
 
-    # ── registration ──────────────────────────────────────────────────────
+    #  registration
 
     def add_skill(self, name, query_tokens, response_tokens):
         """Register skill: query-tokens map to response via holographic + counterfactual."""
@@ -107,7 +107,7 @@ class UnifiedOrganism:
     def register_threat(self, name, tokens):
         return self.immune.register_threat(name, tokens)
 
-    # ── input processing ──────────────────────────────────────────────────
+    #  input processing
 
     def process(self, tokens, user='user'):
         """Run input through full pipeline. Returns trace dict."""
@@ -204,7 +204,7 @@ class UnifiedOrganism:
         self._n_processed += 1
         return trace
 
-    # ── sleep / consolidation ─────────────────────────────────────────────
+    #  sleep / consolidation
 
     def sleep(self, n_atoms=5):
         """Offline consolidation: atomize, propagate, prune, snapshot."""
@@ -233,7 +233,7 @@ class UnifiedOrganism:
 
         return result
 
-    # ── time + introspection ──────────────────────────────────────────────
+    #  time + introspection
 
     def tick(self, n=1):
         """Advance internal clock; oscillator phase moves."""

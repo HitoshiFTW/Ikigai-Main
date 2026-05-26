@@ -65,7 +65,7 @@ def _cosine(a, b):
     return float(np.dot(a, b) / (na * nb))
 
 
-# ── modality encoders ──────────────────────────────────────────────────────────
+#  modality encoders
 
 def encode_text(tokens, d):
     """Position-sensitive bundle HV for token sequence."""
@@ -97,7 +97,7 @@ def encode_audio(spectrum, d, seed=2002):
     return _bsign(flat @ proj)
 
 
-# ── CrossModalSpace ────────────────────────────────────────────────────────────
+#  CrossModalSpace
 
 class CrossModalSpace:
     """
@@ -128,7 +128,7 @@ class CrossModalSpace:
         self.audio_seed = audio_seed
         self._concepts  = {}  # name -> {'hv', 'modalities', 'modal_hvs'}
 
-    # ── encode ────────────────────────────────────────────────────────────
+    #  encode
 
     def encode(self, data, modality):
         """Route data through correct encoder for given modality."""
@@ -141,7 +141,7 @@ class CrossModalSpace:
         else:
             raise ValueError(f'Unknown modality: {modality!r}')
 
-    # ── store ─────────────────────────────────────────────────────────────
+    #  store
 
     def store(self, name, *, text=None, vision=None, audio=None):
         """
@@ -180,7 +180,7 @@ class CrossModalSpace:
         }
         return concept_hv
 
-    # ── query ─────────────────────────────────────────────────────────────
+    #  query
 
     def query(self, hv, top_k=3):
         """
@@ -197,7 +197,7 @@ class CrossModalSpace:
         hv = self.encode(data, modality)
         return self.query(hv, top_k)
 
-    # ── similarity ────────────────────────────────────────────────────────
+    #  similarity
 
     def concept_sim(self, name_a, name_b):
         """Cosine between two stored concept_hvs."""
@@ -230,7 +230,7 @@ class CrossModalSpace:
         q_hv = self.encode(query_data, query_modality)
         return _cosine(q_hv, c['hv'])
 
-    # ── introspection ─────────────────────────────────────────────────────
+    #  introspection
 
     @property
     def n_concepts(self):

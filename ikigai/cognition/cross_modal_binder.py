@@ -59,7 +59,7 @@ class CrossModalBinder:
         self.inducer = SchemaInducer()
         self._bindings = {}   # name -> {intent_hv, proc_hv, schema_hv, modal_hv}
 
-    # ── registration ─────────────────────────────────────────────────────
+    #  registration
 
     def bind_skill_schema(self, name, intent_tokens, proc_tokens, schema_examples):
         """
@@ -86,7 +86,7 @@ class CrossModalBinder:
         }
         return self.d
 
-    # ── query ─────────────────────────────────────────────────────────────
+    #  query
 
     def query(self, query_tokens):
         """
@@ -123,7 +123,7 @@ class CrossModalBinder:
         sim         = _sim(recovered, e['proc_hv'], self.d)
         return recovered, float(sim)
 
-    # ── generation ────────────────────────────────────────────────────────
+    #  generation
 
     def generate(self, query_tokens, *slot_args):
         """
@@ -142,7 +142,7 @@ class CrossModalBinder:
         schema = self.inducer.induce(name)
         return tokens, schema
 
-    # ── stats ─────────────────────────────────────────────────────────────
+    #  stats
 
     @property
     def n_bindings(self):

@@ -40,7 +40,7 @@ def _log(s): print(s, flush=True)
 
 _log('=== Pack 135: Flat-memory generation engine ===\n')
 
-# ── train organism on enough text to have a populated substrate ──────────────
+#  train organism on enough text to have a populated substrate
 org = IkigaiOrganism(flat_only=True)
 TEXT = [
     "the cat sat on the mat and watched the rain",
@@ -69,24 +69,24 @@ _log(f'  trained in {time.perf_counter()-t0:.1f}s. RSS={rss():.0f} MB  '
 
 check('V1 cogitate API wired', hasattr(org, 'cogitate'))
 
-# ── V2 produces text ─────────────────────────────────────────────────────────
+#  V2 produces text
 out = org.cogitate('the cat', max_tokens=20, seed=0)
 _log(f'\n  V2 sample: "{out}"')
 check('V2 produces text', len(out.split()) > 3)
 
-# ── V3 prompt-responsive ─────────────────────────────────────────────────────
+#  V3 prompt-responsive
 a = org.cogitate('the cat', max_tokens=15, seed=42, temperature=0.6)
 b = org.cogitate('the king', max_tokens=15, seed=42, temperature=0.6)
 _log(f'\n  prompt "the cat":  "{a}"')
 _log(f'  prompt "the king": "{b}"')
 check('V3 different prompts -> different outputs', a != b)
 
-# ── V4 thought trace ─────────────────────────────────────────────────────────
+#  V4 thought trace
 out_t, trace = org.cogitate('the rain', max_tokens=10, seed=0, return_trace=True)
 _log(f'\n  V4 trace: {len(trace)} thought HVs, dim {trace[0].shape[0]}')
 check('V4 thought trace exposed', len(trace) > 5 and trace[0].dtype == np.complex64)
 
-# ── V5/V6 constant RAM + constant per-token speed ────────────────────────────
+#  V5/V6 constant RAM + constant per-token speed
 _log('\n  Scaling generation length (constant RAM claim)...')
 sub_before = org.unified.substrate_bytes()
 rss_before = rss()
@@ -114,7 +114,7 @@ check('V6 per-token speed roughly constant (no O(N^2) blowup)',
       tps_2000 > 0.5 * tps_50,
       f'50-tok: {tps_50:.0f} tok/s   2000-tok: {tps_2000:.0f} tok/s')
 
-# ── V7 inject fact mid-gen ───────────────────────────────────────────────────
+#  V7 inject fact mid-gen
 _log('\n  Mid-generation online learning:')
 org.cogitate('the cat', max_tokens=5, seed=0)   # warmup
 # inject a clear novel association
@@ -124,14 +124,14 @@ got = org.few_shot_apply('zerg')
 _log(f'    after injection: few_shot_apply("zerg") = {got}')
 check('V7 mid-generation fact injection works', got[0] == 'alien' if got else False)
 
-# ── V8 think_steps > 0 affects output ────────────────────────────────────────
+#  V8 think_steps > 0 affects output
 out0 = org.cogitate('the cat', max_tokens=20, seed=0, think_steps=0)
 out3 = org.cogitate('the cat', max_tokens=20, seed=0, think_steps=3)
 _log(f'\n  think_steps=0: "{out0}"')
 _log(f'  think_steps=3: "{out3}"')
 check('V8 thought-walk changes output', out0 != out3)
 
-# ── summary ──────────────────────────────────────────────────────────────────
+#  summary
 total = PASS + FAIL
 _log(f'\n{"="*64}')
 _log(f'Pack 135 -- Generation Engine')

@@ -1,7 +1,7 @@
 # ===========================================================================
-# CANONICAL STATE TYPES  (Day 32 Pack 4 — Controlled Modular Extraction)
+# CANONICAL STATE TYPES  (Day 32 Pack 4 -- Controlled Modular Extraction)
 # Extracted from ikigai.py. ikigai.py keeps _IKG = IkigaiContext() so each
-# exec() call gets its own fresh instance — no module-cache singleton leak.
+# exec() call gets its own fresh instance -- no module-cache singleton leak.
 # ===========================================================================
 
 
@@ -17,66 +17,66 @@ class IkigaiContext:
         self.sleeping = True   # safe default: same semantics as old globals().get('sleeping', True)
         self.l23      = None   # SystemRigimeTracker (cortical L2/3 energy)
         self.ado      = None   # AdenosineSystem
-        # Day 33 Pack 1 — Temporal Credit Bridge (read-only signal, default OFF)
+        # Day 33 Pack 1 -- Temporal Credit Bridge (read-only signal, default OFF)
         self.enable_temporal_bridge  = False
         self.temporal_credit_signal  = 0.0
         self.temporal_depth          = 0
-        # Day 33 Pack 2 — Temporal Integration Layer (adjusted credit, default OFF)
+        # Day 33 Pack 2 -- Temporal Integration Layer (adjusted credit, default OFF)
         self.enable_temporal_integration = False
         self.adjusted_credit_signal      = 0.0
-        # Day 33 Pack 3 — Selective Ignition Layer (ignited confidence, default OFF)
+        # Day 33 Pack 3 -- Selective Ignition Layer (ignited confidence, default OFF)
         self.enable_selective_ignition   = False
         self.ignited_confidence_signal   = 0.0
-        # Day 33 Pack 4 — Decision Bridge Layer (override bind signal, default OFF)
+        # Day 33 Pack 4 -- Decision Bridge Layer (override bind signal, default OFF)
         self.enable_decision_bridge      = False
         self.override_bind_signal        = False
-        # Day 34 Pack 1 — Confidence Variance Injection (dampening, default OFF)
+        # Day 34 Pack 1 -- Confidence Variance Injection (dampening, default OFF)
         self.enable_confidence_variance  = False
-        # Day 34 Pack 2 — Candidate-level Confidence Differentiation (default OFF)
+        # Day 34 Pack 2 -- Candidate-level Confidence Differentiation (default OFF)
         self.enable_candidate_variance   = False
-        # Day 34 Pack 3 — Action Routing Correction (windowed fallback, default OFF)
+        # Day 34 Pack 3 -- Action Routing Correction (windowed fallback, default OFF)
         self.enable_routing_correction   = False
-        # Day 34 Pack 4 — Background Policy Diversification (default OFF)
+        # Day 34 Pack 4 -- Background Policy Diversification (default OFF)
         self.enable_bg_policy = False
         self.bg_energy        = 0.5  # l23 mean energy; 0.5 = safe default
         self.bg_pe            = 0.0  # pp.error; 0.0 = use confidence-gap proxy
-        # Day 35 Pack 1 — Action-State Coupling Layer (default OFF)
+        # Day 35 Pack 1 -- Action-State Coupling Layer (default OFF)
         self.enable_action_state_coupling = False
-        # Day 35 Pack 2 — Confidence Compression (near-threshold regime, default OFF)
+        # Day 35 Pack 2 -- Confidence Compression (near-threshold regime, default OFF)
         self.enable_confidence_compression = False
-        # Day 35 Pack 3 — BG Policy Decomposition (anti-monopoly, default OFF)
+        # Day 35 Pack 3 -- BG Policy Decomposition (anti-monopoly, default OFF)
         self.enable_bg_decomposition = False
-        # Day 36 Pack 1 — Credit-to-Decision Coupling (action-conditioned, default OFF)
+        # Day 36 Pack 1 -- Credit-to-Decision Coupling (action-conditioned, default OFF)
         self.enable_credit_coupling = False
         self.last_action_type       = None   # previous tick's selected action; read by ACE
-        # Day 36 Pack 2 — BG Credit Modulation (default OFF)
+        # Day 36 Pack 2 -- BG Credit Modulation (default OFF)
         self.enable_bg_credit       = False
-        # Day 36 Pack 2 — Execution Diversity (BG->exec type remap, default OFF)
+        # Day 36 Pack 2 -- Execution Diversity (BG->exec type remap, default OFF)
         self.enable_exec_diversity  = False
         self.exec_type              = None   # remapped execution type; set when enabled
-        # Day 36 Pack 3 — Score-Based BG Selection (continuous pressure, default OFF)
+        # Day 36 Pack 3 -- Score-Based BG Selection (continuous pressure, default OFF)
         self.enable_bg_scoring      = False
-        # Day 36 Pack 4 — BG Score Rebalancing (equal-scale bases, default OFF)
+        # Day 36 Pack 4 -- BG Score Rebalancing (equal-scale bases, default OFF)
         self.enable_bg_rebalance    = False
-        # Day 36 Pack 5 — Credit-to-Candidate Coupling (candidate-level only, default OFF)
+        # Day 36 Pack 5 -- Credit-to-Candidate Coupling (candidate-level only, default OFF)
         # Credit shifts candidate ranking; top_confidence NEVER modified.
         # Keeps TC natural (~0.53) so BG routing remains reachable.
         self.enable_credit_selection = False
-        # Day 36 Pack 6 — PE Exploration Pressure inside BG (default OFF)
+        # Day 36 Pack 6 -- PE Exploration Pressure inside BG (default OFF)
         # High PE boosts explore, suppresses approach. Only active inside BG scoring path.
         self.enable_pe_exploration   = False
-        # Day 37 Pack 1 — Novelty Pressure (default OFF)
+        # Day 37 Pack 1 -- Novelty Pressure (default OFF)
         # Less-visited coarse states boost explore; no randomness; BG scoring only.
         self.enable_novelty  = False
         self.novelty_counts  = {}
-        # Day 37 Pack 3 — Contextual Curiosity (default OFF)
+        # Day 37 Pack 3 -- Contextual Curiosity (default OFF)
         # Explore only when novelty AND credit-vs-PE mismatch are both high.
         self.enable_contextual_curiosity = False
-        # Day 37 Pack 4 — Curiosity Reinforcement (default OFF)
+        # Day 37 Pack 4 -- Curiosity Reinforcement (default OFF)
         # Exploration that yields good outcomes is remembered and repeated.
         self.enable_curiosity_reinforcement = False
         self.curiosity_value = {}   # state key -> learned exploration value [0,1]
-        # Day 37 V2 — Proto-Representation: Transition Counts (always active, no flag)
+        # Day 37 V2 -- Proto-Representation: Transition Counts (always active, no flag)
         # Records (prev_state_key -> curr_state_key) pair frequencies. Pure observation.
         # No decay, no scoring use. Feeds future prediction / pattern learning.
         self.transition_counts = {}
@@ -510,7 +510,7 @@ class IkigaiContext:
         self._cma_alpha = 0.1
         # Day 47 Pack 4 -- String-Level Held-Out Replay (Sleep Consolidation) (default OFF).
         # Replays [S2,H] during sleep if heldout TE > seen TE, else [S0,S1].
-        # Calls string_process_seq — same machinery as Pack 2, no new predictor.
+        # Calls string_process_seq -- same machinery as Pack 2, no new predictor.
         # OFF = bit-identical to Pack 3 (routing/TC unchanged).
         self.enable_string_replay = False
         self.string_replay_idx = 0
@@ -702,7 +702,7 @@ class IkigaiContext:
         # and VSA collapse under nested symbolic composition.
         # OFF = bit-identical to Pack 2.
         self.enable_nn_composition = False
-        self.nn_role_hv = {}             # {role_name: bytearray} — lazy-init deterministic
+        self.nn_role_hv = {}             # {role_name: bytearray} -- lazy-init deterministic
         self.nn_comp_registry = {}       # bytes(full_hv) -> label str
         self.nn_comp_hv_store = []       # full compositional HVs for retrieval
         self.nn_comp_hv_keys = []
@@ -1069,14 +1069,14 @@ class IkigaiContext:
         self.env_last_state = None
         self.env_last_action = None
         self.env_last_branch_index = 0
-        # Day 38 Pack 1 — Transition Prediction (Proto-Expectation Layer, always active)
+        # Day 38 Pack 1 -- Transition Prediction (Proto-Expectation Layer, always active)
         # Pure inference over transition_counts. No behavior influence, no smoothing,
         # no decay, no learning feedback. Recomputed periodically.
         # Structure: {prev_state_key -> {next_state_key -> probability}}
         self.transition_probs        = {}
         self._pred_last_rebuild_tick = -1
         self.pred_rebuild_interval   = 100
-        # Day 38 Pack 2 — Transition Prediction Error (signal only, always active)
+        # Day 38 Pack 2 -- Transition Prediction Error (signal only, always active)
         # error = 1 - P(actual_next | prev). 1.0 if prev not yet in transition_probs.
         # No smoothing, no thresholding, no behavior influence.
         self.transition_error      = 0.0
@@ -1085,11 +1085,11 @@ class IkigaiContext:
         self._te_sum   = 0.0
         self._te_sumsq = 0.0
         self._te_count = 0
-        # Day 38 Pack 3 — Error-Gated Modulation (bounded score nudge, default OFF)
+        # Day 38 Pack 3 -- Error-Gated Modulation (bounded score nudge, default OFF)
         # K_PE=0.10 strictly < novelty K_N=0.20 (constraint: not a primary driver).
         # No routing/TC/ACE impact; only score_explore += and score_approach -= inside BG.
         self.enable_prediction_modulation = False
-        # Day 38 Pack 4 — Prediction Confidence (signal only, always active)
+        # Day 38 Pack 4 -- Prediction Confidence (signal only, always active)
         # confidence = max P(next | current_state). 0.0 if current state unknown.
         # Independent of error: high conf + high error = "sure and wrong" (real surprise).
         # No smoothing, no thresholding, no behavior influence.
@@ -1097,11 +1097,11 @@ class IkigaiContext:
         self._pc_sum   = 0.0
         self._pc_sumsq = 0.0
         self._pc_count = 0
-        # Day 38 Pack 5 — Confidence-Aware Surprise (selective refinement, default OFF)
+        # Day 38 Pack 5 -- Confidence-Aware Surprise (selective refinement, default OFF)
         # real_surprise = TE * PC. Boost score_explore only when sure-and-wrong.
         # K_CS=0.01 (= 0.5 * K_PE). Sub-PE refinement; same 3 gates as Pack 3.
         self.enable_confidence_surprise = False
-        # Day 39 Pack 1 — State Abstraction (always active, observation only)
+        # Day 39 Pack 1 -- State Abstraction (always active, observation only)
         # Online clustering of coarse states into <=16 reusable concepts.
         # Periodic update; no behavior coupling.
         self.state_embeddings              = {}    # state_key -> feature tuple
@@ -1112,11 +1112,11 @@ class IkigaiContext:
         self.cluster_update_interval       = 100
         self.max_clusters                  = 16
         self.cluster_distance_threshold    = 3.0
-        # Day 39 Pack 2 — Concept-Conditioned Modulation (default OFF, weak context)
+        # Day 39 Pack 2 -- Concept-Conditioned Modulation (default OFF, weak context)
         # K_CTX_CL=0.005 strictly < K_CS=0.01 < K_PE=0.02 < K_N=0.20.
         # Cluster context guides; never drives.
         self.enable_concept_modulation     = False
-        # Day 39 Pack 3 — Concept Transition Learning (always active, observation only)
+        # Day 39 Pack 3 -- Concept Transition Learning (always active, observation only)
         # Records (cid_prev -> cid_curr) frequencies; periodic rebuild to probs.
         # Bounded by max_clusters^2 (256). No behavior coupling.
         self.cluster_transition_counts    = {}    # (cid_prev, cid_curr) -> int count
@@ -1124,7 +1124,7 @@ class IkigaiContext:
         self._cluster_prev_id             = None
         self._cluster_last_rebuild_tick   = -1
         self.cluster_rebuild_interval     = 100
-        # Day 39 Pack 4 — Concept-Level Error & Confidence (signal only, always active)
+        # Day 39 Pack 4 -- Concept-Level Error & Confidence (signal only, always active)
         # TE_c = 1 - P(cid_actual | cid_prev). PC_c = max P(cid_next | cid_prev).
         # Unknown prev -> TE_c = 1.0, PC_c = 0.0. No behavior influence.
         self.cluster_transition_error = 0.0
@@ -1135,7 +1135,7 @@ class IkigaiContext:
         self._cpc_sum   = 0.0
         self._cpc_sumsq = 0.0
         self._cpc_count = 0
-        # Day 39 Pack 5 — Cross-Level Conflict (meta-consistency, signal only)
+        # Day 39 Pack 5 -- Cross-Level Conflict (meta-consistency, signal only)
         # conflict = |state_TE*state_PC - concept_TE*concept_PC|. Signed variant retains direction.
         # No behavior influence; pure observation of disagreement between micro and macro models.
         self.cross_level_conflict = 0.0
@@ -1143,38 +1143,38 @@ class IkigaiContext:
         self._cc_sum   = 0.0
         self._cc_sumsq = 0.0
         self._cc_count = 0
-        # Day 39 Pack 6 — Conflict-Gated Attention (default OFF, smallest K in stack)
+        # Day 39 Pack 6 -- Conflict-Gated Attention (default OFF, smallest K in stack)
         # Gated: signed<0 AND conflict>=0.6 AND cooldown elapsed.
         # K_CF=0.002 strictly < K_CTX_CL=0.005 < K_CS=0.01 < K_PE=0.02 < K_N=0.20.
         self.enable_conflict_attention = False
         self.conflict_cooldown_ticks   = 5
         self._conflict_last_tick       = -1
-        # Day 39 Pack 7 — Attention Persistence (default OFF)
+        # Day 39 Pack 7 -- Attention Persistence (default OFF)
         # Conflict event triggers temporal focus window (5 ticks, exponential decay).
         # K_AP=0.001 strictly < K_CF=0.002. Activated by Pack 6 fire only.
         self.enable_attention_persistence = False
         self.attention_timer              = 0
         self.attention_strength           = 0.0
-        # Day 39 Pack 8 — Safe-Probing under Conflict (default OFF, energy-gated)
+        # Day 39 Pack 8 -- Safe-Probing under Conflict (default OFF, energy-gated)
         # K_SP=0.0015. Active only when attention window open AND energy safe margin.
         # Investigates anomalies without breaking energy stability.
         self.enable_safe_probe = False
-        # Day 39 Pack 9 — Targeted Exploration (default OFF, signal-gated)
+        # Day 39 Pack 9 -- Targeted Exploration (default OFF, signal-gated)
         # K_TE=0.0012 < K_SP=0.0015. Probes only where model is meaningfully wrong:
         # max(state_TE * state_PC, concept_TE * concept_PC) > 0.3.
         self.enable_targeted_explore = False
-        # Day 39 Pack 10 — Selective Override (default OFF, ultra-strict gate)
+        # Day 39 Pack 10 -- Selective Override (default OFF, ultra-strict gate)
         # K_OV=0.0008 < K_TE=0.0012. Active only when target_signal > 0.7 AND
         # attention window open AND energy safe. Reduces approach/wait dominance
         # rather than boosting explore directly.
         self.enable_selective_override = False
-        # Day 39 Pack 11 — Micro-Strategy Persistence (default OFF, smallest K)
+        # Day 39 Pack 11 -- Micro-Strategy Persistence (default OFF, smallest K)
         # K_MS=0.0006 < K_OV=0.0008. Brief commit (3 ticks) to last action when
         # attention high + target_signal > 0.6. No long-term lock; max 3 ticks.
         self.enable_strategy_persistence = False
         self.strategy_timer              = 0
         self.strategy_action             = None
-        # Day 40 Pack 1 — VSA Foundation (default OFF, storage-only)
+        # Day 40 Pack 1 -- VSA Foundation (default OFF, storage-only)
         # Vector Symbolic Architecture: binary hypervectors with XOR binding,
         # majority bundling, hamming similarity. Item memory is fixed (no growth).
         # NOT connected to BG / routing / scoring / energy. Pure representation layer.
@@ -1182,7 +1182,7 @@ class IkigaiContext:
         self.vsa_dim     = 400          # match cortical population scale
         self.vsa_items   = {}           # name -> bytearray(0/1) of length vsa_dim
         self.vsa_current = None         # working register (lPFC analog)
-        # Day 40 Pack 2 — Observational VSA Encoding (default OFF, fixed buffer)
+        # Day 40 Pack 2 -- Observational VSA Encoding (default OFF, fixed buffer)
         # Per-tick (cid, action) bound events accumulate in a circular buffer.
         # Multi-scale similarity (sim_1, sim_5, sim_20) measures internal
         # representation stability. NO behavior coupling (signal only).
@@ -1199,7 +1199,7 @@ class IkigaiContext:
         self.vsa_sim5_count  = 0
         self.vsa_sim20_sum   = 0.0
         self.vsa_sim20_count = 0
-        # Day 40 Pack 3 — Semantic Validation (default OFF, signal only)
+        # Day 40 Pack 3 -- Semantic Validation (default OFF, signal only)
         # Spike threshold raised to 0.5; classification of spikes by what changed
         # (cluster vs action vs both); separation metric for same vs diff cluster
         # similarity; pattern reuse via buffer match counts.
@@ -1210,18 +1210,18 @@ class IkigaiContext:
         self.vsa_spike_cluster_change = 0
         self.vsa_spike_action_change  = 0
         self.vsa_spike_both_change    = 0
-        # Stability tracking — same vs different cluster similarity
+        # Stability tracking -- same vs different cluster similarity
         self.vsa_same_cluster_sim_sum = 0.0
         self.vsa_same_cluster_count   = 0
         self.vsa_diff_cluster_sim_sum = 0.0
         self.vsa_diff_cluster_count   = 0
-        # Pattern reuse — buffer matches above threshold per event
+        # Pattern reuse -- buffer matches above threshold per event
         self.vsa_pattern_match_count = 0
         self.vsa_pattern_total       = 0
         self.vsa_pattern_threshold   = 0.8
         # Previous action carrier (needed for spike action-change classification)
         self.vsa_prev_action = None
-        # Day 40 Pack 4 — Representation Manipulation (default OFF, signal only)
+        # Day 40 Pack 4 -- Representation Manipulation (default OFF, signal only)
         # Decomposition: bind(E, CID) recovers ACT; bind(E, ACT) recovers CID.
         # Chain: bundle(E_t, E_{t-1}) preserves both components above 0.5 cosine.
         # All metrics aggregated; no behavior coupling.
@@ -1231,7 +1231,7 @@ class IkigaiContext:
         self.vsa_chain_event = None
         self.vsa_chain_sim   = 0.0
         self.vsa_chain_count = 0
-        # Day 41 Pack 1 — VSA-Prediction Diagnostic Link (default OFF, observation only)
+        # Day 41 Pack 1 -- VSA-Prediction Diagnostic Link (default OFF, observation only)
         # Correlates VSA spike events with transition_error (TE) and
         # prediction_confidence (PC) at the same tick.
         # No behavior coupling. Gated by enable_vsa_prediction_link.
@@ -1248,7 +1248,7 @@ class IkigaiContext:
         self.non_spike_count   = 0      # total non-spike ticks recorded by prediction link
         self.vsa_te_threshold  = 0.5    # TE boundary: >=0.5 = "high error"
         self.vsa_pc_threshold  = 0.7    # PC boundary: >=0.7 = "high confidence"
-        # Day 41 Pack 2 — Real-Surprise Gated Modulation (default OFF)
+        # Day 41 Pack 2 -- Real-Surprise Gated Modulation (default OFF)
         # First controlled coupling: S_real = spike AND TE_high AND PC_high.
         # Minimal BG nudge when system was confidently wrong and structure changed.
         # K_RS=0.001 strictly < K_CF=0.002 << all primary drivers.
@@ -1257,10 +1257,10 @@ class IkigaiContext:
         self.vsa_real_trigger_count     = 0      # times S_real fired and was applied
         self.vsa_real_applied_count     = 0      # redundant check: should equal trigger
         self.K_RS                       = 0.001  # explore nudge; 0.5*K_RS suppresses approach
-        # Day 41 Pack 3 — Surprise Persistence Window (temporal extension of S_real)
+        # Day 41 Pack 3 -- Surprise Persistence Window (temporal extension of S_real)
         # Short-lived internal state: K_SW explore nudge for vsa_sw_duration ticks post S_real.
         # No stacking: timer resets to vsa_sw_duration on each new S_real.
-        # K_SW=0.0005 < K_RS=0.001 — softest layer in the behavioral stack.
+        # K_SW=0.0005 < K_RS=0.001 -- softest layer in the behavioral stack.
         self.enable_vsa_surprise_window = False
         self.vsa_sw_timer        = 0       # ticks remaining in active window
         self.vsa_sw_duration     = 3       # hard bound; window cannot exceed this
@@ -1268,19 +1268,19 @@ class IkigaiContext:
         self.vsa_sw_activations  = 0       # times S_real started a window
         self.vsa_sw_ticks        = 0       # total waking ticks with window active
         self.vsa_sw_active_tick  = False   # set True this tick if window applied; reset each tick
-        # Day 41 Pack 4 — Pattern-Guided Exploration (context-aware adjustment)
+        # Day 41 Pack 4 -- Pattern-Guided Exploration (context-aware adjustment)
         # Uses recent VSA event similarity to bias direction WITHIN the surprise window.
-        # K_PG=0.0003 < K_SW=0.0005 — weakest modulation layer in behavioral stack.
+        # K_PG=0.0003 < K_SW=0.0005 -- weakest modulation layer in behavioral stack.
         self.enable_vsa_pattern_guidance = False
         self.K_PG              = 0.0003  # directional nudge; K_PG / 0.5*K_PG pair
         self.vsa_pg_applied    = 0       # window ticks where guidance was evaluated
         self.vsa_pg_ticks      = 0       # spec alias for applied
         self.vsa_pg_high_ticks = 0       # ticks where sim > 0.7 (stable -> exploit)
         self.vsa_pg_low_ticks  = 0       # ticks where sim < 0.3 (transition -> explore)
-        # Day 41 Pack 5 — Micro-Strategy Commitment (short-lived directional hold)
+        # Day 41 Pack 5 -- Micro-Strategy Commitment (short-lived directional hold)
         # Converts Pack 4 directional signal into a bounded commitment within window.
         # Reset when sw_timer == 0; no stacking (activate only when ms_timer == 0).
-        # K_MS=0.0002 < K_PG=0.0003 — weakest behavioral layer.
+        # K_MS=0.0002 < K_PG=0.0003 -- weakest behavioral layer.
         self.enable_vsa_micro_strategy = False
         self.vsa_ms_timer       = 0       # ticks remaining in active commitment
         self.vsa_ms_duration    = 2       # hard bound on hold duration
@@ -1289,9 +1289,9 @@ class IkigaiContext:
         self.vsa_ms_activations = 0       # times a commitment was started
         self.vsa_ms_ticks       = 0       # total ticks commitment was applied
         self.vsa_ms_active_tick = False   # set True this tick if commitment applied; reset each tick
-        # Day 41 Pack 6 — Cross-Window Continuity Signal
+        # Day 41 Pack 6 -- Cross-Window Continuity Signal
         # Detects repeated S_real contexts via 4-event buffer; K_CT fires only inside window.
-        # K_CT=0.0001 < K_MS=0.0002 — weakest behavioral layer.
+        # K_CT=0.0001 < K_MS=0.0002 -- weakest behavioral layer.
         self.enable_vsa_continuity  = False
         self.vsa_ct_buffer          = []     # last vsa_ct_max S_real event vectors
         self.vsa_ct_max             = 4      # hard cap on buffer size
@@ -1300,9 +1300,9 @@ class IkigaiContext:
         self.vsa_ct_events          = 0      # S_real events processed by continuity
         self.vsa_ct_matches         = 0      # S_real events with sim > 0.7 (repeat detected)
         self.vsa_ct_mod_ticks       = 0      # window ticks where continuity modulation applied
-        # Day 41 Pack 7 — Repetition-Weighted Modulation (loop-aware adjustment)
+        # Day 41 Pack 7 -- Repetition-Weighted Modulation (loop-aware adjustment)
         # Scales explore nudge by normalized similarity; fires only in window + repeat context.
-        # K_RW=0.00005 < K_CT=0.0001 — absolute weakest behavioral layer.
+        # K_RW=0.00005 < K_CT=0.0001 -- absolute weakest behavioral layer.
         self.enable_vsa_repetition_weighting = False
         self.vsa_rw_strength = 0.0    # normalized intensity in [0, 1]; 0 outside repeat context
         self.K_RW            = 0.00005 # base coefficient; scaled by vsa_rw_strength
@@ -1387,7 +1387,7 @@ class IkigaiContext:
         self.P_PERTURB2 = 0.03
 
     # -------------------------------------------------------------------
-    # Day 40 Pack 1 — VSA operators (binding / bundling / similarity)
+    # Day 40 Pack 1 -- VSA operators (binding / bundling / similarity)
     # All operators are O(N), allocation-bounded, and pure (no side effects
     # except vsa_init_items which is idempotent). Behavior unaffected when
     # enable_vsa = False (these methods are simply never called).
@@ -1487,7 +1487,7 @@ class IkigaiContext:
             if s1 < self.vsa_spike_threshold:
                 self.vsa_spike_count += 1
                 self.vsa_sim_spikes  += 1   # legacy alias
-                # Classification — what changed at this transition?
+                # Classification -- what changed at this transition?
                 cluster_changed = (prev_cid is not None and curr_cid is not None
                                    and prev_cid != curr_cid)
                 action_changed  = (prev_action is not None and curr_action is not None
@@ -1498,7 +1498,7 @@ class IkigaiContext:
                     self.vsa_spike_action_change += 1
                 if cluster_changed and action_changed:
                     self.vsa_spike_both_change += 1
-            # Same/diff cluster separation — only meaningful when both ids known
+            # Same/diff cluster separation -- only meaningful when both ids known
             if prev_cid is not None and curr_cid is not None:
                 if prev_cid == curr_cid:
                     self.vsa_same_cluster_sim_sum += s1
@@ -1528,7 +1528,7 @@ class IkigaiContext:
                     acc += self.vsa_cosine(event, prev)
                 setattr(self, sum_attr, getattr(self, sum_attr) + acc / k)
                 setattr(self, cnt_attr, getattr(self, cnt_attr) + 1)
-            # Pattern reuse — count buffer entries with similarity above threshold.
+            # Pattern reuse -- count buffer entries with similarity above threshold.
             matches = 0
             scan_k = min(cnt, n_buf)
             for j in range(1, scan_k + 1):
@@ -2596,7 +2596,7 @@ class IkigaiContext:
                         break
             tokens.append(next_tok)
             # Loop detection: stop if the last 4 tokens form a 4-gram seen anywhere before.
-            # Seeded with prompt 4-grams → catches repeats that span prompt boundary.
+            # Seeded with prompt 4-grams -> catches repeats that span prompt boundary.
             if len(tokens) >= 4:
                 fg = tuple(tokens[-4:])
                 if fg in seen_fourgrams:
@@ -2952,7 +2952,7 @@ class IkigaiContext:
     # ---- Pack 21 Day 52: Operation Pattern Table ----
 
     def op_pattern_learn(self, seq):
-        """Extract op→first_response mapping from a Q-A sequence.
+        """Extract op->first_response mapping from a Q-A sequence.
         Pattern: ["Q", op_token, ..., "A", first_resp, ...]
         After N calls with same op, op_pattern_table[op] = first_resp.
         Used by rls_hybrid_generate for argument-independent generalization."""
@@ -2991,7 +2991,7 @@ class IkigaiContext:
         import numpy as np
 
         # Step 1: Direct N-gram coverage (ONLY for domain-agnostic generation).
-        # When target_domain is set, N-gram is domain-blind — skip to BoW WM
+        # When target_domain is set, N-gram is domain-blind -- skip to BoW WM
         # which carries explicit domain tags for correct routing.
         p = list(prompt_tokens)
         if target_domain is None:
@@ -3022,7 +3022,7 @@ class IkigaiContext:
             plen = len(p)
             a_tok = "A"
 
-            # 2a: Question-part PoS retrieval — matches only the question tokens (before "A").
+            # 2a: Question-part PoS retrieval -- matches only the question tokens (before "A").
             # Eliminates answer-token dilution when short novel queries face long stored templates.
             q_part = p[:p.index("A")] if "A" in p else p
             q_part = q_part if q_part else p
@@ -3039,7 +3039,7 @@ class IkigaiContext:
                     aidx = pos_tmpl.index(a_tok)
                     return p + pos_tmpl[aidx + 1:]
 
-            # 2b: BoW retrieval — for novel prompts with different vocabulary.
+            # 2b: BoW retrieval -- for novel prompts with different vocabulary.
             if self.nn_holo_wm_bow_vecs:
                 bow_q = self.token_encode_seq_bow(p)
                 bow_tmpl, _bow_sim = self.nn_holo_wm_nearest_bow(
@@ -3054,7 +3054,7 @@ class IkigaiContext:
                     if len(bow_tmpl) > plen:
                         return p + bow_tmpl[plen:]
 
-        # Step 2.5: VSA Analogy fallback — derive first response token via structural analogy.
+        # Step 2.5: VSA Analogy fallback -- derive first response token via structural analogy.
         # Fires when WM retrieval found no usable template. Genuinely generative:
         # answers novel queries by analogy from nearest stored Q-A pattern.
         if self.enable_vsa_analogy and p[-1] == "A":
@@ -3065,7 +3065,7 @@ class IkigaiContext:
                     return ext
                 return self.generate(ext, max_len=max_len, temperature=temperature)
 
-        # Step 3: RLS routing — extend with predicted token if trigram covers it.
+        # Step 3: RLS routing -- extend with predicted token if trigram covers it.
         # Multi-turn: start from persistent chat_reservoir (conversation history blends in).
         if self.enable_multiturn and self.chat_reservoir is not None:
             self.rls_reservoir = self.chat_reservoir.copy()

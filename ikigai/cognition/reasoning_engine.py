@@ -76,7 +76,7 @@ QUERY_MARKERS = [
 PRONOUNS = {'she', 'he', 'it', 'they', 'her', 'him', 'them', 'his', 'hers'}
 
 
-# ── token utilities ──────────────────────────────────────────────────────────
+#  token utilities
 
 def tokenize(text):
     """Lowercase, strip punct except $, %, ?."""
@@ -91,7 +91,7 @@ def extract_number(tokens, i):
     return None
 
 
-# ── Working memory ───────────────────────────────────────────────────────────
+#  Working memory
 
 class WorkingMemory:
     """
@@ -159,7 +159,7 @@ class WorkingMemory:
         return list(self._history)
 
 
-# ── Sentence parser ──────────────────────────────────────────────────────────
+#  Sentence parser
 
 class Statement:
     """One parsed statement: entity, op, value, obj."""
@@ -281,7 +281,7 @@ class ReasoningParser:
         return target_obj, target_entity
 
 
-# ── Reasoning engine (the core) ──────────────────────────────────────────────
+#  Reasoning engine (the core)
 
 class ReasoningEngine:
     """

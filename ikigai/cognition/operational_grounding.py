@@ -84,7 +84,7 @@ class OperationalGrounding:
         self._n_obs    = {}   # verb -> observation count
         self._delta_hist = {} # verb -> list of (n_before, m, n_after) observations
 
-    # ── quantity encoding/decoding ────────────────────────────────────────
+    #  quantity encoding/decoding
 
     def encode_quantity(self, n):
         """N -> phasor with phase N*omega along q_axis."""
@@ -105,7 +105,7 @@ class OperationalGrounding:
     def coefficient(self, verb):
         return self._c.get(verb)
 
-    # ── observation / learning ────────────────────────────────────────────
+    #  observation / learning
 
     def observe_tuple(self, verb, n_before, modifier, n_after):
         """
@@ -178,7 +178,7 @@ class OperationalGrounding:
         c = self.observe_tuple(verb, n_before, modifier, n_after)
         return (verb, n_before, modifier, n_after, c)
 
-    # ── prediction ────────────────────────────────────────────────────────
+    #  prediction
 
     def predict(self, n_before, verb, modifier):
         """Predict post-state quantity N + c*M."""
@@ -191,7 +191,7 @@ class OperationalGrounding:
         """HV-level apply: quantity_hv(N) * rotor(c, M) -> result_hv."""
         return self.encode_quantity(n_before) * self.rotor(verb, modifier)
 
-    # ── introspection ─────────────────────────────────────────────────────
+    #  introspection
 
     def vocab(self):
         return list(self._c.keys())

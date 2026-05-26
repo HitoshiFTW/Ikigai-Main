@@ -91,7 +91,7 @@ class InverseCompiler:
         self.d        = d
         self._programs = {}     # name -> program_hv
 
-    # ── registration ──────────────────────────────────────────────────────
+    #  registration
 
     def register(self, name, program_tokens, io_examples=None):
         """
@@ -118,7 +118,7 @@ class InverseCompiler:
     def program_hv(self, name):
         return self._programs.get(name)
 
-    # ── forward execution ─────────────────────────────────────────────────
+    #  forward execution
 
     def forward(self, name, input_tokens):
         """Apply program forward: bind(program_hv, input_hv) -> predicted output HV."""
@@ -127,7 +127,7 @@ class InverseCompiler:
             return None
         return _bind(p, _encode(input_tokens, self.d))
 
-    # ── inverse compilation ──────────────────────────────────────────────
+    #  inverse compilation
 
     def induce(self, io_examples):
         """
@@ -153,7 +153,7 @@ class InverseCompiler:
         results.sort(key=lambda x: -x[1])
         return results[:top_k]
 
-    # ── verification ──────────────────────────────────────────────────────
+    #  verification
 
     def verify(self, program_name, io_examples, threshold=0.3):
         """
@@ -172,7 +172,7 @@ class InverseCompiler:
         n_total = len(io_examples)
         return n_correct, n_total, (n_correct / n_total if n_total else 0.0)
 
-    # ── introspection ─────────────────────────────────────────────────────
+    #  introspection
 
     @property
     def n_programs(self):

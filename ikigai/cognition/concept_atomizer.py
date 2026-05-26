@@ -98,7 +98,7 @@ class ConceptAtomizer:
         self._cluster_of   = {}    # episode_name -> atom_name
         self.n_sleep_cycles = 0
 
-    # ── wake phase ────────────────────────────────────────────────────────
+    #  wake phase
 
     def record(self, name, tokens, tick=None):
         """Record episode during wake. Returns episode HV."""
@@ -108,7 +108,7 @@ class ConceptAtomizer:
         self._episodes[name] = hv
         return hv
 
-    # ── sleep phase ───────────────────────────────────────────────────────
+    #  sleep phase
 
     def sleep(self, n_atoms=5, max_iter=20):
         """
@@ -171,7 +171,7 @@ class ConceptAtomizer:
         self.n_sleep_cycles += 1
         return new_atoms
 
-    # ── recall ────────────────────────────────────────────────────────────
+    #  recall
 
     def recall_hv(self, hv, top_k=3):
         """Nearest atoms to given HV. Returns [(atom_name, sim), ...]."""
@@ -184,7 +184,7 @@ class ConceptAtomizer:
         """Encode tokens, find nearest concept atoms."""
         return self.recall_hv(_encode(tokens, self.d), top_k)
 
-    # ── introspection ─────────────────────────────────────────────────────
+    #  introspection
 
     def atom_members(self, atom_name):
         """Episode names assigned to this atom in last sleep."""

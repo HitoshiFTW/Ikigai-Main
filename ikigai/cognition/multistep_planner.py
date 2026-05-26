@@ -64,7 +64,7 @@ class MultiStepPlanner:
         self.world  = world_model
         self.fea    = action_selector
 
-    # ── score a plan ──────────────────────────────────────────────────────
+    #  score a plan
 
     def score_plan(self, start_state, actions):
         """Walk plan, return (final_state, total_score, trajectory)."""
@@ -81,7 +81,7 @@ class MultiStepPlanner:
             current = next_state
         return current, total, traj
 
-    # ── beam search plan ──────────────────────────────────────────────────
+    #  beam search plan
 
     def plan(self, start_state, goal_state, max_depth=5, beam_width=3, score_min=0.1):
         """
@@ -155,7 +155,7 @@ class MultiStepPlanner:
             }
         return self._empty_plan(start_state)
 
-    # ── DFS with backtrack ────────────────────────────────────────────────
+    #  DFS with backtrack
 
     def plan_with_backtrack(self, start_state, goal_state, max_depth=5, branching=3):
         """DFS with explicit backtrack tracking."""
@@ -218,7 +218,7 @@ class MultiStepPlanner:
             'backtracks':  stats['backtracks'],
         }
 
-    # ── helpers ───────────────────────────────────────────────────────────
+    #  helpers
 
     def _empty_plan(self, start_state):
         return {

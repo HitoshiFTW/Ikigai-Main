@@ -86,7 +86,7 @@ class ConversationalVariationalFreeEnergyField:
         self.action_log = []
         self.turn_count = 0
 
-    # ─── free energy components ────────────────────────────────────
+    #  free energy components
 
     def kl_surprise(self):
         return float(np.clip(1.0 - _cosine(self.B_current, self.B_prior), 0.0, 1.0))
@@ -112,7 +112,7 @@ class ConversationalVariationalFreeEnergyField:
             0.0, None
         ))
 
-    # ─── action selection ──────────────────────────────────────────
+    #  action selection
 
     def expected_free_energy(self, action, F=None):
         if F is None:
@@ -129,7 +129,7 @@ class ConversationalVariationalFreeEnergyField:
         F = self.free_energy()
         return {a: _EF_COEFF[a] * F for a in ACTIONS}
 
-    # ─── state update ─────────────────────────────────────────────
+    #  state update
 
     def ingest(self, B_new, utterance_hv=None):
         """
@@ -154,7 +154,7 @@ class ConversationalVariationalFreeEnergyField:
     def update_prior(self, B_new_prior):
         self.B_prior = _l2_normalize(B_new_prior.copy())
 
-    # ─── stats ────────────────────────────────────────────────────
+    #  stats
 
     def free_energy_stats(self):
         if not self.F_log:

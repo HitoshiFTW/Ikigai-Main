@@ -11,13 +11,13 @@ Foundation:
 
 Flow:
     α_t      = (1 + Re⟨s_t, R_phase⟩) / 2          // state projection [0, 1]
-    s_t+1    = Π_c · (s_t ⊙ exp(i·θ_c·(1 + γ·α_t)))   // rotate then shift
+    s_t+1    = Π_c . (s_t ⊙ exp(i.θ_c.(1 + γ.α_t)))   // rotate then shift
 
 Properties:
-    - Same byte at different states → different rotation magnitude (non-linear)
-    - Π_c shifts → couples components (no longer elementwise)
+    - Same byte at different states -> different rotation magnitude (non-linear)
+    - Π_c shifts -> couples components (no longer elementwise)
     - State always on unit-phasor torus (unitary evolution)
-    - Byte stream → continuous trajectory in ℂ^d
+    - Byte stream -> continuous trajectory in ℂ^d
 
 vs standard VSA:
     Discrete codebook lookup => continuous integration
@@ -128,7 +128,7 @@ class CGPSPEncoder:
         """One CGPSP integration step: rotate then couple."""
         # State projection α ∈ [0, 1]
         alpha = (1.0 + float(np.real(np.vdot(self._R_phase, s))) / self.d) / 2.0
-        # Per-byte phase rotation, scaled by (1 + gamma·alpha)
+        # Per-byte phase rotation, scaled by (1 + gamma.alpha)
         scale = 1.0 + self.gamma * alpha
         theta = self._theta[byte_val] * scale
         rot   = np.exp(1j * theta).astype(np.complex64)
@@ -161,7 +161,7 @@ class CGPSPEncoder:
         den = float(np.linalg.norm(a)) * float(np.linalg.norm(b))
         return num / den if den > 0 else 0.0
 
-    # ── reverse for sanity (NOT exact decoder, but trajectory invertible at byte granularity) ──
+    #  reverse for sanity (NOT exact decoder, but trajectory invertible at byte granularity)
 
     def _step_inverse(self, s, byte_val):
         """Inverse step: undo coupling then derotate."""

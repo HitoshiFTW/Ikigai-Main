@@ -24,19 +24,19 @@ Public interface:
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# ── Pillars (foundation) ─────────────────────────────────────────────────────
+#  Pillars (foundation)
 from ikigai.cognition.cgpsp_encoder       import CGPSPEncoder
 from ikigai.cognition.pi_k_algebra        import PiK
 from ikigai.cognition.pgmw                import PersonaGrid
 from ikigai.cognition.sac_field           import SACField
 
-# ── Reasoning core (hardcoded path -- works on simple SVO) ───────────────────
+#  Reasoning core (hardcoded path -- works on simple SVO)
 from ikigai.cognition.reasoning_engine    import (
     ReasoningEngine, ReasoningParser, WorkingMemory,
     OPERATOR_LEXICON, QUERY_MARKERS,
 )
 
-# ── BEING: persistent living organism (the substrate) ────────────────────────
+#  BEING: persistent living organism (the substrate)
 from ikigai.cognition.being               import IkigaiBeing
 from ikigai.cognition.operational_grounding import OperationalGrounding
 from ikigai.cognition.sensory_grounding   import SensoryGrounding
@@ -47,7 +47,7 @@ from ikigai.cognition.multirole_memory    import MultiRoleMemory
 from ikigai.cognition.dialogue            import DialogueLoop
 from ikigai.cognition.generator           import SentenceGenerator
 
-# ── Memory + cognition modules ───────────────────────────────────────────────
+#  Memory + cognition modules
 from ikigai.cognition.holographic_memory  import HolographicMemory
 from ikigai.cognition.cross_modal_space   import CrossModalSpace
 from ikigai.cognition.cross_time_resonance import CrossTimeResonator
@@ -66,7 +66,7 @@ from ikigai.cognition.persona_fe_coupling import PersonaFEC
 from ikigai.cognition.vsa_calculus        import VSACalculus
 from ikigai.cognition.hot_loader          import CognitionHotLoader
 
-# ── Inherited Day-54 modules ─────────────────────────────────────────────────
+#  Inherited Day-54 modules
 from ikigai.cognition.skill_crystal       import SkillCrystal
 
 
@@ -163,7 +163,7 @@ class IkigaiOrganism:
         self._last_trace = []
         self._tick = 0
 
-    # ── Primary interface ────────────────────────────────────────────────
+    #  Primary interface
 
     def ask(self, text):
         """
@@ -207,7 +207,7 @@ class IkigaiOrganism:
         """Process statement without expecting answer."""
         return self.ask(text)
 
-    # ── language acquisition ─────────────────────────────────────────────
+    #  language acquisition
 
     def read(self, text):
         """
@@ -261,7 +261,7 @@ class IkigaiOrganism:
                     self.unified.relate(tok, 'sensory', anchor)
         return self.being.reflect() if self.being is not None else None
 
-    # ── unified-memory interface (Pack 118): query the one flat substrate ────
+    #  unified-memory interface (Pack 118): query the one flat substrate
 
     def isa_of(self, word, candidates=None):
         """Hypernym of word from unified memory (cleanup recall). source-of-truth migrating off dict."""
@@ -360,7 +360,7 @@ class IkigaiOrganism:
         """Channel 2 from flat memory: decoded coefficient (Pack 121)."""
         return self.unified.predict_verb_coefficient(verb)
 
-    # ── few-shot pattern learning (Pack 132) ────────────────────────────────
+    #  few-shot pattern learning (Pack 132)
 
     def _ensure_role(self, role):
         """Register a role if missing; deterministic per (seed, role-name)."""
@@ -533,7 +533,7 @@ class IkigaiOrganism:
             out.append(cands[idx][0])
         return ' '.join(out)
 
-    # ── flat-memory interface (Pack 114-115) ─────────────────────────────────
+    #  flat-memory interface (Pack 114-115)
 
     def flat_similarity(self, w1, w2):
         """Word similarity from the constant-RAM flat substrate."""
@@ -616,7 +616,7 @@ class IkigaiOrganism:
         """-log2 P(curr | prev). High = phrase boundary."""
         return self.grammar.surprise(prev, curr)
 
-    # ── Phase 3: dialogue + generation ───────────────────────────────────
+    #  Phase 3: dialogue + generation
 
     def new_dialogue(self, persona=None):
         """Start a fresh multi-turn conversation."""
@@ -652,7 +652,7 @@ class IkigaiOrganism:
         self._last_trace = []
         self._tick = 0
 
-    # ── Long-term memory ─────────────────────────────────────────────────
+    #  Long-term memory
 
     def remember(self, name, key_tokens, value_tokens):
         """Long-term holographic store."""
@@ -662,7 +662,7 @@ class IkigaiOrganism:
         """Long-term holographic recall."""
         return self.holo.recall(key_tokens, top_k=top_k)
 
-    # ── Introspection ────────────────────────────────────────────────────
+    #  Introspection
 
     def status(self):
         return {
@@ -687,7 +687,7 @@ class IkigaiOrganism:
         return (f"<IkigaiOrganism tick={s['tick']} eps={s['n_episodes']} "
                 f"wm={s['wm_vars']}>")
 
-    # ── Persistence ──────────────────────────────────────────────────────
+    #  Persistence
 
     def save(self, path):
         """
@@ -762,7 +762,7 @@ class IkigaiOrganism:
         return org
 
 
-# ── singleton convenience ────────────────────────────────────────────────────
+#  singleton convenience
 
 _DEFAULT = None
 

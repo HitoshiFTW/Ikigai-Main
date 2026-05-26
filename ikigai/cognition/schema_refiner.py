@@ -57,7 +57,7 @@ class SchemaRefiner:
         self._neg  = {}   # name -> int
         self._conf = {}   # name -> float
 
-    # ── observation ───────────────────────────────────────────────────────
+    #  observation
 
     def observe(self, name, tokens):
         """Append-only example storage. Returns support count."""
@@ -67,7 +67,7 @@ class SchemaRefiner:
         """Batch observe. Returns final support count."""
         return self.inducer.observe_many(name, examples)
 
-    # ── application ───────────────────────────────────────────────────────
+    #  application
 
     def apply(self, name, *args):
         """Generate token list from schema + slot args."""
@@ -84,7 +84,7 @@ class SchemaRefiner:
         ok, score = self.verifier.verify_coherence(tokens, B_U)
         return tokens, ok, float(score)
 
-    # ── feedback ──────────────────────────────────────────────────────────
+    #  feedback
 
     def feedback(self, name, tokens, positive):
         """
@@ -116,7 +116,7 @@ class SchemaRefiner:
         self._conf[name] = conf
         return conf
 
-    # ── stats ─────────────────────────────────────────────────────────────
+    #  stats
 
     def confidence(self, name):
         return self._conf.get(name, 0.5)

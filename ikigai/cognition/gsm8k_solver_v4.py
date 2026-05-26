@@ -25,7 +25,7 @@ from ikigai.cognition.gsm8k_solver_v3 import (
 from ikigai.cognition.verifier import solve_chain, solve_verifier, extract_numbers_smart
 
 
-# ── new V4 handlers ───────────────────────────────────────────────────────────
+#  new V4 handlers
 
 def try_multi_item_cost(text):
     """
@@ -192,7 +192,7 @@ def try_per_day_total(text):
     return _to_num(per_day * days)
 
 
-# ── V4 main solver ────────────────────────────────────────────────────────────
+#  V4 main solver
 
 def solve_v4(text):
     """

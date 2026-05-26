@@ -26,7 +26,7 @@ from collections import Counter, defaultdict
 import numpy as np
 
 
-# ── filters ──────────────────────────────────────────────────────────────────
+#  filters
 
 _STOPWORDS_HYPER = {
     'a', 'an', 'the', 'and', 'or', 'but', 'so', 'if', 'then', 'now', 'at',
@@ -118,7 +118,7 @@ def _is_verb_form(word):
 
 
 def _is_adjective(word):
-    """Reject clear adjective forms — not valid hypernyms."""
+    """Reject clear adjective forms -- not valid hypernyms."""
     for suf in _ADJ_SUFFIXES:
         if word.endswith(suf):
             # 'ish' only counts for longer words: fish/dish/wish are nouns
@@ -152,7 +152,7 @@ def _looks_like_hypernym(word, extra_excluded=None):
     return True
 
 
-# ── Hearst pattern definitions ────────────────────────────────────────────────
+#  Hearst pattern definitions
 
 # Each pattern: (regex, (hypo_group, hyper_group), name)
 # hypo_group / hyper_group: 1-indexed match group positions
@@ -190,7 +190,7 @@ def _renorm(hv):
     return (hv / mags).astype(np.complex64)
 
 
-# ── TaxonomicGrounding class ─────────────────────────────────────────────────
+#  TaxonomicGrounding class
 
 class TaxonomicGrounding:
     """
@@ -224,7 +224,7 @@ class TaxonomicGrounding:
         self._hypernyms   = defaultdict(Counter)  # hypo -> {hyper: count}
         self._pattern_hits = Counter()      # pattern_name -> count
 
-    # ── extraction ────────────────────────────────────────────────────────
+    #  extraction
 
     def extract_pairs(self, text):
         """
@@ -249,7 +249,7 @@ class TaxonomicGrounding:
                 out.append((hypo, hyper, name))
         return out
 
-    # ── exposure ──────────────────────────────────────────────────────────
+    #  exposure
 
     def expose(self, text, lexicon, drift_rate=0.3, hyper_back_rate=0.05):
         """
@@ -272,7 +272,7 @@ class TaxonomicGrounding:
 
         return pairs
 
-    # ── queries ───────────────────────────────────────────────────────────
+    #  queries
 
     def hypernym_of(self, word):
         """Most-asserted hypernym for word, or None."""
@@ -322,7 +322,7 @@ class TaxonomicGrounding:
             current = parent
         return chain
 
-    # ── introspection ─────────────────────────────────────────────────────
+    #  introspection
 
     @property
     def n_pairs(self):

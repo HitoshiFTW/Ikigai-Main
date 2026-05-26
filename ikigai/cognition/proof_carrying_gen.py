@@ -1,7 +1,7 @@
 """
 ikigai.cognition.proof_carrying_gen -- Proof-Carrying Generation.
 
-Day 55 Pack 63 -- ★1 invention #7: derivation chain HV per output.
+Day 55 Pack 63 -- *1 invention #7: derivation chain HV per output.
 
 Analog: Necula 1997 Proof-Carrying Code. Every output ships with a proof of
 its derivation. Recipient verifies in O(N) chain length. Tamper any step ->
@@ -156,7 +156,7 @@ class ProofCarryingGenerator:
         self.rules    = {}      # rule_name -> rule_hv
         self._library = {}      # name -> (output_hv, chain)
 
-    # ── rule registry ─────────────────────────────────────────────────────
+    #  rule registry
 
     def add_rule(self, rule_name):
         if rule_name not in self.rules:
@@ -166,7 +166,7 @@ class ProofCarryingGenerator:
     def rule_hv(self, rule_name):
         return self.rules.get(rule_name)
 
-    # ── generation ────────────────────────────────────────────────────────
+    #  generation
 
     def generate(self, query_tokens, rule_sequence, premise_tokens_list):
         """
@@ -189,7 +189,7 @@ class ProofCarryingGenerator:
         ok, _ = chain.verify()
         return current, chain, ok
 
-    # ── library ───────────────────────────────────────────────────────────
+    #  library
 
     def store(self, name, output_hv, chain):
         self._library[name] = (
@@ -211,7 +211,7 @@ class ProofCarryingGenerator:
     def n_stored(self):
         return len(self._library)
 
-    # ── explain ───────────────────────────────────────────────────────────
+    #  explain
 
     def explain(self, chain):
         """Return [(step_idx, rule_name, premise_norm, conclusion_norm)] for inspection."""

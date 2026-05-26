@@ -1,5 +1,5 @@
 """
-ikigai.cognition.wake_sleep — Wake-Sleep Codebook Factorization (Day 54 Pack 23)
+ikigai.cognition.wake_sleep -- Wake-Sleep Codebook Factorization (Day 54 Pack 23)
 
 Rank 5 invention from research roadmap (+8% HumanEval projected).
 DreamCoder analog for VSA: during sleep, scan accumulated transitions,
@@ -7,12 +7,12 @@ identify high-frequency patterns, bundle them into NEW atomic HVs that
 become first-class vocabulary items.
 
 Behavior:
-    record(prev, curr)      — log transition into matrix + frequency counter
-    sleep(top_k, min_count) — extract top-K frequent (prev,curr) -> create
+    record(prev, curr)      -- log transition into matrix + frequency counter
+    sleep(top_k, min_count) -- extract top-K frequent (prev,curr) -> create
                               compound HVs via bipolar bind (p * c)
-    find_compound(p, c)     — look up cached compound for a pair
+    find_compound(p, c)     -- look up cached compound for a pair
     encode_via_compounds(seq)
-                            — encode sequence using available compounds first,
+                            -- encode sequence using available compounds first,
                               fallback to atomic HVs (lossy compression of
                               long sequences into shorter bundles)
 

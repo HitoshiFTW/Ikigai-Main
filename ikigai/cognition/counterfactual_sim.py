@@ -90,7 +90,7 @@ class CounterfactualField:
         self._scenarios = []   # list of (name, action_hv, outcome_hv, weight)
         self._raw_accum = np.zeros(d, dtype=np.int32)   # un-normalized for ranking
 
-    # ── construction ──────────────────────────────────────────────────────
+    #  construction
 
     def add_scenario(self, name, action_tokens, outcome_tokens, weight=1.0):
         """Add (action ⊕ outcome) binding to field."""
@@ -108,7 +108,7 @@ class CounterfactualField:
     def field_hv(self):
         return self._field.copy()
 
-    # ── queries ───────────────────────────────────────────────────────────
+    #  queries
 
     def query_outcome(self, action_tokens, candidate_outcome_tokens):
         """
@@ -136,7 +136,7 @@ class CounterfactualField:
         results.sort(key=lambda x: -x[1])
         return results
 
-    # ── planning ──────────────────────────────────────────────────────────
+    #  planning
 
     def free_energy(self, goal_tokens):
         """
@@ -174,7 +174,7 @@ class CounterfactualField:
                 best_name  = name
         return best_name, float(best_score)
 
-    # ── perturbation / counterfactual edit ────────────────────────────────
+    #  perturbation / counterfactual edit
 
     def perturb(self, scenario_name, new_outcome_tokens):
         """

@@ -81,7 +81,7 @@ class CuriosityDrive:
         self._pe         = {}    # (state_key, action_key) -> running PE
         self._visits     = {}    # state_key -> count
 
-    # ── observation logging ──────────────────────────────────────────────
+    #  observation logging
 
     def record_pe(self, state_tokens, action_tokens, predicted_outcome_hv, observed_outcome_hv):
         """Log PE = 1 - cos(predicted, observed). EMA-merge into existing PE."""
@@ -101,7 +101,7 @@ class CuriosityDrive:
         self._visits[sk] = self._visits.get(sk, 0) + 1
         return pe_step
 
-    # ── PE queries ────────────────────────────────────────────────────────
+    #  PE queries
 
     def pe(self, state_tokens, action_tokens):
         return float(self._pe.get((tuple(state_tokens), tuple(action_tokens)), 0.0))
@@ -125,7 +125,7 @@ class CuriosityDrive:
     def visit_count(self, state_tokens):
         return int(self._visits.get(tuple(state_tokens), 0))
 
-    # ── curiosity-augmented action selection ──────────────────────────────
+    #  curiosity-augmented action selection
 
     def curiosity_bonus(self, state_tokens, action_tokens):
         """beta * PE(s,a) + gamma * novelty(s). Higher = more curious.
@@ -160,14 +160,14 @@ class CuriosityDrive:
                 best_action = action_tokens
         return best_action, float(best_score)
 
-    # ── decay (boredom) ──────────────────────────────────────────────────
+    #  decay (boredom)
 
     def decay(self):
         """Globally decay all PE values toward 0. Models habituation."""
         for k in list(self._pe.keys()):
             self._pe[k] = max(0.0, self._pe[k] * (1.0 - self.decay_rate))
 
-    # ── introspection ─────────────────────────────────────────────────────
+    #  introspection
 
     @property
     def n_logged(self):

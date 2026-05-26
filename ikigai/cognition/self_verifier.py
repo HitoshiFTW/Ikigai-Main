@@ -75,7 +75,7 @@ class SelfVerifier:
         self.total_selections = 0   # times non-first candidate won
         self.coherence_log    = []  # (score_before, score_after) per beam select
 
-    # ── coherence verification ─────────────────────────────────────────────
+    #  coherence verification
 
     def verify_coherence(self, response_tokens, B_U):
         """
@@ -91,7 +91,7 @@ class SelfVerifier:
             self.total_passed += 1
         return ok, float(score)
 
-    # ── consistency verification ───────────────────────────────────────────
+    #  consistency verification
 
     def verify_consistency(self, response_tokens, crystal):
         """
@@ -108,7 +108,7 @@ class SelfVerifier:
         ok = len(contradictions) == 0
         return ok, contradictions
 
-    # ── beam selection ─────────────────────────────────────────────────────
+    #  beam selection
 
     def verify_and_select(self, candidates, B_U):
         """
@@ -166,7 +166,7 @@ class SelfVerifier:
         gain = best_score - score_0
         return best_tokens, best_score, gain
 
-    # ── stats ──────────────────────────────────────────────────────────────
+    #  stats
 
     def pass_rate(self):
         if self.total_verified == 0:

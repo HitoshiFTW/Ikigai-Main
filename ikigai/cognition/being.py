@@ -109,7 +109,7 @@ class IkigaiBeing:
         self._episodes        = []      # list of (ts, text, n_tokens)
         self._word_counts     = {}      # frequency tracking
 
-    # ── core learning loop ────────────────────────────────────────────────
+    #  core learning loop
 
     def _ensure_word(self, w):
         """Mint a new HV for first-seen word."""
@@ -183,7 +183,7 @@ class IkigaiBeing:
         self.n_tokens_seen += len(tokens)
         self._episodes.append((time.time(), text, len(tokens)))
 
-    # ── introspection ────────────────────────────────────────────────────
+    #  introspection
 
     def cosine_words(self, w1, w2):
         """Real cosine between two lexicon words. None if either unseen."""
@@ -219,7 +219,7 @@ class IkigaiBeing:
         """Age = bytes consumed (proxy for cognitive experience)."""
         return self.bytes_consumed
 
-    # ── sleep / consolidation ────────────────────────────────────────────
+    #  sleep / consolidation
 
     def dream(self):
         """
@@ -232,7 +232,7 @@ class IkigaiBeing:
         return {'vocab_size': self.vocab_size(),
                 'curiosity':  float(self.curiosity)}
 
-    # ── reflection ───────────────────────────────────────────────────────
+    #  reflection
 
     def reflect(self):
         """Return status snapshot."""

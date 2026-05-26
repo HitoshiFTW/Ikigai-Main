@@ -1,7 +1,7 @@
 """
 ikigai.cognition.skill_crystal -- One-Shot Skill Crystallization.
 
-Day 55 Pack 42 -- Decisive ★3 completion.
+Day 55 Pack 42 -- Decisive *3 completion.
 
 Problem: LLMs learn novel patterns only via gradient fine-tuning.
          Fine-tuning: hours GPU + catastrophic forgetting.
@@ -16,7 +16,7 @@ No-forgetting proof: _skills[name] modified ONLY when learn(name,...) called.
                      learn(name_k) for k≠j leaves _skills[name_j] unchanged.
                      This is arithmetic, not probability.
 
-One-shot: count=1 → rank=1 recall. No iterations. No gradient.
+One-shot: count=1 -> rank=1 recall. No iterations. No gradient.
 
 vs LLM: 1B transformer needs fine-tuning to learn novel skill.
         Fine-tuning hours. Forgetting guaranteed at scale.
@@ -27,7 +27,7 @@ import numpy as np
 
 
 def _hv(word, d):
-    """Bipolar ±1 HV — 'skill::' namespace separate from BSPM."""
+    """Bipolar ±1 HV -- 'skill::' namespace separate from BSPM."""
     seed = hash(f'skill::{word}') & 0x7FFFFFFF
     rng = np.random.RandomState(seed)
     return (rng.randint(0, 2, size=d) * 2 - 1).astype(np.float32)
@@ -48,7 +48,7 @@ def _bind(a, b):
     return a * b
 
 
-_unbind = _bind  # bind(bind(a,b), a) = a²·b = b for bipolar ±1
+_unbind = _bind  # bind(bind(a,b), a) = a².b = b for bipolar ±1
 
 
 def _sim(a, b, d):
@@ -71,10 +71,10 @@ class SkillCrystal:
 
     def __init__(self, d=400):
         self.d = d
-        self._skills = {}  # name → {intent_hv, proc_hv, skill_hv, ...}
-        self._counts = {}  # name → learn count (monotone)
+        self._skills = {}  # name -> {intent_hv, proc_hv, skill_hv, ...}
+        self._counts = {}  # name -> learn count (monotone)
 
-    # ── learning ──────────────────────────────────────────────────────────
+    #  learning
 
     def learn(self, name, intent_tokens, proc_tokens):
         """
@@ -112,7 +112,7 @@ class SkillCrystal:
         self._counts[name] = self._counts.get(name, 0) + 1
         return self._skills[name]['skill_hv'].copy()
 
-    # ── retrieval ─────────────────────────────────────────────────────────
+    #  retrieval
 
     def recall(self, query_tokens, top_k=3):
         """
@@ -154,8 +154,8 @@ class SkillCrystal:
         """
         For each skill, query by stored intent_tokens (re-encoded from scratch).
         Returns {name: (rank, top_score)}.
-        rank=1 → correct top-1 recall.
-        All rank=1 after N skills → no-forgetting demonstration.
+        rank=1 -> correct top-1 recall.
+        All rank=1 after N skills -> no-forgetting demonstration.
         """
         names = list(self._skills.keys())
         results = {}
@@ -167,7 +167,7 @@ class SkillCrystal:
             results[name] = (rank, all_scores[0][1])
         return results
 
-    # ── stats ─────────────────────────────────────────────────────────────
+    #  stats
 
     def skill_count(self, name):
         return self._counts.get(name, 0)

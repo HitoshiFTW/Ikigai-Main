@@ -90,7 +90,7 @@ class GSM8KTrainer:
         self._train_ans  = {}      # ep_name -> gold_answer (int/float)
         self.n_train     = 0
 
-    # ── training ───────────────────────────────────────────────────────────
+    #  training
 
     def train(self, records, n_atoms=100, max_train=None, verbose=True):
         """
@@ -186,7 +186,7 @@ class GSM8KTrainer:
             'atom_coverage':        {a: s for a, s in self._atom_stats.items()},
         }
 
-    # ── lookup ─────────────────────────────────────────────────────────────
+    #  lookup
 
     def cluster_lookup(self, question):
         """Return (nearest_atom, preferred_method, atom_quality)."""
@@ -206,7 +206,7 @@ class GSM8KTrainer:
         recalled = self.memory.recall(tokens, top_k=top_k)
         return recalled
 
-    # ── hybrid solver ──────────────────────────────────────────────────────
+    #  hybrid solver
 
     def hybrid_solve(self, question, mem_confidence_min=0.3):
         """
@@ -246,7 +246,7 @@ class GSM8KTrainer:
 
         return None, 'none'
 
-    # ── introspection ─────────────────────────────────────────────────────
+    #  introspection
 
     def report_summary(self):
         return {

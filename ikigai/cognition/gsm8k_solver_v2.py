@@ -27,7 +27,7 @@ from ikigai.cognition.verifier import solve_chain, solve_verifier, extract_numbe
 _FRAC_PATTERN  = re.compile(r'(\d+)\s*/\s*(\d+)\s+(?:are|of|is)\b', re.IGNORECASE)
 _PERCENT_PAT   = re.compile(r'(\d+(?:\.\d+)?)\s*%', re.IGNORECASE)
 _RATE_PAT      = re.compile(r'(\d+(?:\.\d+)?)\s+\w+\s+per\s+(\d+(?:\.\d+)?)', re.IGNORECASE)
-_PACK_PAT      = re.compile(r'(\d+)\s*[-–]?\s*pack', re.IGNORECASE)
+_PACK_PAT      = re.compile(r'(\d+)\s*[--]?\s*pack', re.IGNORECASE)
 _TIMES_MORE    = re.compile(r'(\d+)\s+times?\s+(more|as\s+many|the)', re.IGNORECASE)
 _THREE_NUM     = re.compile(r'\b(\d+(?:\.\d+)?)\b.*\b(\d+(?:\.\d+)?)\b.*\b(\d+(?:\.\d+)?)\b')
 
@@ -39,7 +39,7 @@ def _to_num(x):
     return x
 
 
-# ── special-case handlers ─────────────────────────────────────────────────────
+#  special-case handlers
 
 def try_fraction(text):
     """
@@ -202,7 +202,7 @@ def try_times_more(text):
     return _to_num(base * mult)
 
 
-# ── main solver ──────────────────────────────────────────────────────────────
+#  main solver
 
 def solve_v2(text):
     """

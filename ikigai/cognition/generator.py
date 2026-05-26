@@ -59,7 +59,7 @@ class SentenceGenerator:
         self.d   = int(d)
         self._rng = random.Random()
 
-    # ── candidates from bigrams ───────────────────────────────────────────
+    #  candidates from bigrams
 
     def _next_word_candidates(self, prev_word, top_k=20):
         """Return top-k candidate next-words from bigram counts, with probs."""
@@ -75,7 +75,7 @@ class SentenceGenerator:
         ranked = [(w, c / total) for w, c in candidates.most_common(top_k)]
         return ranked
 
-    # ── word selection w/ context bias + persona ─────────────────────────
+    #  word selection w/ context bias + persona
 
     def _select_next(self, prev_word, mode='context_biased',
                      context_hv=None, persona=None,
@@ -113,7 +113,7 @@ class SentenceGenerator:
             else:
                 base = max(prob, 1e-6)
 
-            # ── Fix 1: persona contrastive boost ──
+            #  Fix 1: persona contrastive boost
             persona_boost = 1.0
             if persona is not None and persona in self.org.persona._personas \
                and word in self.org.being.lexicon:
@@ -122,7 +122,7 @@ class SentenceGenerator:
                 # Exponential boost: exp(gamma * cos). gamma=4 -> 50x boost at cos=1.
                 persona_boost = float(np.exp(persona_gamma * cos_p))
 
-            # ── Fix 2: syntactic L/R context feedback ──
+            #  Fix 2: syntactic L/R context feedback
             # candidate's left_ctx should match the trajectory we have so far
             syntax_boost = 1.0
             if trajectory_hv is not None and word != self.org.grammar.SENT_EOS:
@@ -162,7 +162,7 @@ class SentenceGenerator:
         else:
             return max(scores, key=lambda x: x[1])[0]
 
-    # ── primary interface ───────────────────────────────────────────────
+    #  primary interface
 
     def generate(self, prompt='', max_len=15, mode='context_biased',
                  context_hv=None, persona=None,
@@ -237,7 +237,7 @@ class SentenceGenerator:
 
         return ' '.join(output)
 
-    # ── dialogue helper ──────────────────────────────────────────────────
+    #  dialogue helper
 
     def respond(self, user_text, dialogue_loop=None, max_len=12,
                 temperature=0.6, persona=None, seed=None):

@@ -42,7 +42,7 @@ UNITS = {
 }
 
 
-# ── unit-conversion + dozen handler ───────────────────────────────────────────
+#  unit-conversion + dozen handler
 
 def try_dozen_subtract(text):
     """
@@ -239,7 +239,7 @@ def try_total_then_subtract(text):
     return _to_num(total - losses)
 
 
-# ── main V3 solver ────────────────────────────────────────────────────────────
+#  main V3 solver
 
 def solve_v3(text):
     """

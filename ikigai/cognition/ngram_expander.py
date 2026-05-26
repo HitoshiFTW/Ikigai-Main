@@ -41,7 +41,7 @@ class NGramExpander:
         self._unigram = {}       # word -> total count
         self._total_tokens = 0
 
-    # ─── training ────────────────────────────────────────────────
+    #  training
 
     def train_on_turn(self, tokens):
         """Online n-gram update. Monotone: counts never decrease."""
@@ -60,7 +60,7 @@ class NGramExpander:
                 self._counts[prefix] = {}
             self._counts[prefix][next_w] = self._counts[prefix].get(next_w, 0) + 1
 
-    # ─── expansion ───────────────────────────────────────────────
+    #  expansion
 
     def expand(self, seed_words, max_len=None):
         """
@@ -96,7 +96,7 @@ class NGramExpander:
 
         return result
 
-    # ─── fallback unigram expansion ──────────────────────────────
+    #  fallback unigram expansion
 
     def top_unigrams(self, k=5, exclude=None):
         """Top-k unigram words, optionally excluding a set."""
@@ -107,7 +107,7 @@ class NGramExpander:
         )
         return [w for w, _ in ranked[:k]]
 
-    # ─── stats ───────────────────────────────────────────────────
+    #  stats
 
     @property
     def vocab_size(self):

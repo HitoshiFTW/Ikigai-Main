@@ -52,7 +52,7 @@ def _log(s): print(s, flush=True)
 
 _log('=== Pack 127: Vision channel (modality-blindness proof) ===\n')
 
-# ── 0. Build flat-only organism ──────────────────────────────────────────────
+#  0. Build flat-only organism
 
 org = IkigaiOrganism(flat_only=True)
 mr = org.unified
@@ -66,7 +66,7 @@ sub_initial = mr.substrate_bytes()
 rss0 = rss()
 _log(f'  organism: substrate={sub_initial/1_048_576:.0f} MB FIXED, RSS={rss0:.0f} MB')
 
-# ── 1. Inject TEXT knowledge first (this will be tested for survival) ────────
+#  1. Inject TEXT knowledge first (this will be tested for survival)
 
 _log('\n--- Phase A: text knowledge ---')
 text_corpus = ["the cat sat on the mat", "the dog ran in the park",
@@ -86,7 +86,7 @@ isa_before = {h: org.isa_of(h) for h in isa_facts}
 _log(f'  cat~dog={cd_before:+.3f}  cat~car={cc_before:+.3f}')
 _log(f'  isa: {isa_before}')
 
-# ── 2. Vision data ───────────────────────────────────────────────────────────
+#  2. Vision data
 
 if not HAVE_SKLEARN:
     _log('\nERROR: scikit-learn missing. pip install scikit-learn')
@@ -101,7 +101,7 @@ _log(f'  train: {len(X_tr)}, test: {len(X_te)}, classes: 10, features: {X.shape[
 
 check('V1 digits dataset loaded', len(X_tr) > 100 and len(X_te) > 50)
 
-# ── 3. Vision encoder (random projection -> phasor) ──────────────────────────
+#  3. Vision encoder (random projection -> phasor)
 
 # Pre-compute projection matrix once
 D = mr.d  # 512
@@ -113,7 +113,7 @@ def encode_image(img):
     phase = (P_matrix @ img).astype(np.float32)
     return np.exp(1j * phase).astype(np.complex64)
 
-# ── 4. Train: write each image's encoded HV under 'class' role, value = label key ──
+#  4. Train: write each image's encoded HV under 'class' role, value = label key
 
 _log('\nTraining vision...')
 t0 = time.perf_counter()
@@ -124,7 +124,7 @@ for img, lbl in zip(X_tr, y_tr):
     mr.sdm_rel.write(bound_addr, class_keys[str(int(lbl))])
 _log(f'  trained {len(X_tr)} images in {time.perf_counter()-t0:.1f}s')
 
-# ── 5. Evaluate ──────────────────────────────────────────────────────────────
+#  5. Evaluate
 
 def predict(img):
     addr_img = encode_image(img)
@@ -150,13 +150,13 @@ _log(f'  eval in {time.perf_counter()-t0:.1f}s')
 check('V2 train acc >= 70%', train_acc >= 0.70, f'train={train_acc:.0%}')
 check('V3 test  acc >= 55%', test_acc  >= 0.55, f'test={test_acc:.0%}')
 
-# ── 6. Substrate flatness ────────────────────────────────────────────────────
+#  6. Substrate flatness
 
 sub_after_vision = mr.substrate_bytes()
 check('V4 substrate FIXED pre/post vision', sub_after_vision == sub_initial,
       f'{sub_initial} -> {sub_after_vision}')
 
-# ── 7. Verify text knowledge survives ────────────────────────────────────────
+#  7. Verify text knowledge survives
 
 _log('\n--- Phase C: verify text channels survived vision training ---')
 cd_after = org.unified_similarity('cat', 'dog') or 0.0
@@ -175,7 +175,7 @@ check('V5 IS-A facts survive vision training',
 check('V6 cooccur similarity preserves cat~dog > cat~car',
       cd_after > cc_after, f'cd={cd_after} cc={cc_after}')
 
-# ── 8. Inject NEW IS-A facts AFTER vision -- substrate not "full" ────────────
+#  8. Inject NEW IS-A facts AFTER vision -- substrate not "full"
 
 _log('\n--- Phase D: inject new facts after vision ---')
 new_facts = {'apple': 'fruit', 'car': 'vehicle'}
@@ -185,13 +185,13 @@ got = {h: org.isa_of(h) for h in new_facts}
 _log(f'  new facts: {got}')
 check('V7 new IS-A facts work after vision', got == new_facts, f'{got}')
 
-# ── 9. RAM ───────────────────────────────────────────────────────────────────
+#  9. RAM
 
 rss_final = rss()
 _log(f'\n  final RSS: {rss_final:.0f} MB  (started {rss0:.0f})')
 check('V8 inference RAM under 500 MB', rss_final < 500, f'{rss_final:.0f} MB')
 
-# ── summary ──────────────────────────────────────────────────────────────────
+#  summary
 
 total = PASS + FAIL
 _log(f'\n{"="*64}')

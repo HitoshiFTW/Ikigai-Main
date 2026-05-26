@@ -1,4 +1,4 @@
-"""ikigai.cognition — high-level reasoning capabilities atop the organism."""
+"""ikigai.cognition -- high-level reasoning capabilities atop the organism."""
 
 from ikigai.cognition.routers import ToolRouter
 from ikigai.cognition.memory import TransitionMemory
