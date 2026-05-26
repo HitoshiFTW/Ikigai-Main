@@ -69,12 +69,17 @@ class GenerationEngine:
                               (1.0, 0.0, 0.0) to fall back to bigram-only.
       ngram_ctx            - how many trailing tokens to feed the combined
                               n-gram scorer (default 3 = up to 4-gram).
+      goal_gamma           - alignment strength to a FIXED goal HV (Pack 142).
+                              Goal is the initial prompt HV and does NOT drift.
+                              Thought drifts via momentum; goal anchors the
+                              speak step toward prompt-topic across long gen.
+                              0.0 = off (pre-Pack-142 behaviour).
     """
 
     def __init__(self, organism, think_steps=3, momentum=0.7,
                  thought_gamma=4.0, temperature=0.7, top_k=20,
                  remove_common=True, ngram_weights=(0.2, 0.4, 0.4),
-                 ngram_ctx=3):
+                 ngram_ctx=3, goal_gamma=0.0):
         self.org = organism
         self.think_steps = int(think_steps)
         self.momentum = float(momentum)
@@ -84,7 +89,9 @@ class GenerationEngine:
         self.remove_common = bool(remove_common)
         self.ngram_weights = tuple(ngram_weights)
         self.ngram_ctx = int(ngram_ctx)
+        self.goal_gamma = float(goal_gamma)
         self.thought = None
+        self.goal = None
         self.thought_trace = []
         self.history = []
         self._rng = random.Random()
@@ -94,11 +101,14 @@ class GenerationEngine:
         d = self.org.unified.d
         if not prompt_tokens:
             self.thought = np.ones(d, dtype=np.complex64) / np.sqrt(d)
+            self.goal = self.thought.copy()
             return
         accum = np.zeros(d, dtype=np.complex64)
         for t in prompt_tokens:
             accum = accum + self.org.unified.ck.key(t)
         self.thought = _renorm(accum)
+        # Pack 142: goal is the FIXED initial prompt HV; never drifts.
+        self.goal = self.thought.copy()
 
     #  one think step: thought-state walks the substrate
     def think_step(self):
@@ -127,11 +137,22 @@ class GenerationEngine:
             for v in self.org.unified._dirs:
                 thought = thought - np.vdot(v, thought) * v
             thought = _renorm(thought)
+        # Pack 142: optional goal anchor (fixed prompt HV). Same projection
+        # as thought (mean-removal applied to keep comparable).
+        goal = self.goal
+        if self.goal_gamma > 0.0 and goal is not None and self.remove_common:
+            for v in self.org.unified._dirs:
+                goal = goal - np.vdot(v, goal) * v
+            goal = _renorm(goal)
         scores = []
         for w, base in cands:
             kw = self.org.unified.ck.key(w)
             align = float(np.real(np.vdot(kw, thought))) / d
-            scores.append((w, max(float(base), 1e-6) * float(np.exp(self.thought_gamma * align))))
+            boost = self.thought_gamma * align
+            if self.goal_gamma > 0.0 and goal is not None:
+                g_align = float(np.real(np.vdot(kw, goal))) / d
+                boost += self.goal_gamma * g_align
+            scores.append((w, max(float(base), 1e-6) * float(np.exp(boost))))
         vals = np.array([s for _, s in scores], dtype=np.float64)
         vals = vals / max(self.temperature, 1e-3)
         vals = vals - vals.max()
