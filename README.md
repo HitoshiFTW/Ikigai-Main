@@ -48,6 +48,8 @@ python experiments/day58_pack132_few_shot.py
 - **Multi-modal on one 192 MB substrate** -- text, vision (MNIST), arithmetic, taxonomy all share the same memory with no interference. (`day58_pack127_vision_channel.py`)
 - **Few-shot pattern learning that persists** -- 5 novel mappings (`flompet -> red`, etc) learned in 2 shots, survive 5K+ distractors across modalities. (`day58_pack132_few_shot.py`)
 - **Trigram + 4-gram channels at zero substrate cost** -- higher-order n-grams via permute-then-bind cost no additional RAM. (`day58_pack136_ngrams.py`)
+- **Real Wikipedia in 192 MB** -- 200 Simple English Wikipedia articles (8,306 sentences, 79K tokens) absorbed in 68 seconds; substrate stays 192 MB FIXED; learned co-occurrences (north-south +0.55, year-month +0.45, king-queen +0.33) recovered cleanly. Cross-modal channels (vision, math, IS-A) intact after the flood. (`day58_pack137_simple_wiki.py`)
+- **RapidTrainer: 7.5x faster training** -- batched cross-sentence flush + stopword filter cuts per-token training cost without changing write semantics. Same substrate, same recall quality, much faster scaling. (`day58_pack138_rapid_trainer.py`)
 
 ## Status
 
