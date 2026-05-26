@@ -1,0 +1,29 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# generated state (runtime artifacts, not source)
+ikigai_state.json
+ikigai_state_backup*.json
+ikigai_log.txt
+ikigai_run_*.log
+report_err.txt
+
+# checkpoints (large pickle blobs)
+checkpoints/
+*.pkl
+*.npz
+
+# editor
+.idea/
+.vscode/
+*.swp
+.DS_Store
