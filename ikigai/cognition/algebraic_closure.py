@@ -9,7 +9,7 @@ This module searches the space and tests each candidate against algebraic
 properties (associativity, commutativity, self-inverse, distributivity).
 
 Search space:
-    Binary ops on ±1: f: {±1}^2 -> {±1}, which is 16 possible functions.
+    Binary ops on +/-1: f: {+/-1}^2 -> {+/-1}, which is 16 possible functions.
     Each represented as a truth table (4 entries).
     Operators extend elementwise to d-dim HVs.
 
@@ -26,7 +26,7 @@ Bio analog: cortical microcircuit motifs. Cortex implements multiple ops
 
 Closure property:
     An algebraic system is "closed" under op f if f's output is always in
-    the same space. All our ±1 -> ±1 binary ops are closed by construction.
+    the same space. All our +/-1 -> +/-1 binary ops are closed by construction.
 
 vs LLM: no such notion. Ikigai: programmable algebraic substrate.
         Discovered ops extend the bind/bundle/permute trinity.
@@ -36,8 +36,8 @@ import numpy as np
 from itertools import product
 
 
-# All 16 binary boolean ops on {±1}^2 -> {±1}
-# Each op is a 4-entry truth table: [(−1,−1), (−1,+1), (+1,−1), (+1,+1)]
+# All 16 binary boolean ops on {+/-1}^2 -> {+/-1}
+# Each op is a 4-entry truth table: [(-1,-1), (-1,+1), (+1,-1), (+1,+1)]
 
 def _truth_table_to_op(table):
     """Build a binary op from a 4-entry truth table."""
@@ -58,7 +58,7 @@ def _truth_table_to_op(table):
 
 
 def _gen_all_ops():
-    """Generate all 16 binary ops on ±1 inputs."""
+    """Generate all 16 binary ops on +/-1 inputs."""
     ops = []
     for table in product([-1.0, +1.0], repeat=4):
         ops.append((tuple(table), _truth_table_to_op(table)))
@@ -154,7 +154,7 @@ def distributes_over_bundle(op, n_trials=10, d=64, seed=4):
 
 class AlgebraicClosure:
     """
-    Searches the space of 16 binary ops on ±1^2 for those satisfying
+    Searches the space of 16 binary ops on +/-1^2 for those satisfying
     desired algebraic properties.
 
     discover(properties, d=64) -> list of (table, op_fn, satisfied_props)

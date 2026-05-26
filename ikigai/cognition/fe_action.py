@@ -20,7 +20,7 @@ Two-term tradeoff:
     - Pragmatic (exploit): match goal directly
     - Epistemic (explore): reduce uncertainty about unfamiliar actions
 
-Bio: dopamine = reward prediction error = -∇FE. Action selection in BG.
+Bio: dopamine = reward prediction error = -gradFE. Action selection in BG.
 
 vs LLM: action selection = autoregressive next-token. No goal-conditioning.
         FEActionSelector: explicit FE gradient on belief field. Plan-aware.

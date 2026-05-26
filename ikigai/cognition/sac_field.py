@@ -7,25 +7,25 @@ Energy landscape inference over hypervector manifold.
 Each task category = basin attractor. Inference = gradient descent on energy.
 
 Mathematical core:
-    State s ∈ ℂ^d (phasor)
+    State s  in  C^d (phasor)
     Basin attractors: B_1, ..., B_K (one per task category)
-    Pairwise field tensor per basin:  F_k^(2) = Σ_{i ∈ basin_k} q_i q_i^H
+    Pairwise field tensor per basin:  F_k^(2) = Sigma_{i  in  basin_k} q_i q_i^H
 
     Energy:
         E_local_k(s) = -Re<s, F_k^(2) s>     (pull toward basin k)
-        E(s) = -Σ_k softmax(<s, B_k>).E_local_k(s)   (basin-conditional)
+        E(s) = -Sigma_k softmax(<s, B_k>).E_local_k(s)   (basin-conditional)
 
     Gradient (closed-form, no autograd):
-        ∂E_local_k / ∂s = -2 . F_k^(2) . s
+        dE_local_k / ds = -2 . F_k^(2) . s
 
     Dynamics:
-        s_{t+1} = normalize(s_t - η . ∇E(s_t))
+        s_{t+1} = normalize(s_t - eta . gradE(s_t))
 
 Algorithm:
     1. Encode query -> s_0
     2. Step k=1..N: descend energy field
     3. Trajectory enters a basin; basin acts as attractor
-    4. Final s_∞ decoded against codebook
+    4. Final s_inf decoded against codebook
 """
 
 import numpy as np
@@ -45,9 +45,9 @@ class BasinField:
     Single basin: attractor center + rank-r outer-product field tensor (low-memory).
 
     Stored as a list of memory vectors {q_i, weight_i}. Field never materialized
-    in full (d² could be 16 MB at d=2048). Instead computed on the fly:
-        F . s = Σ_i w_i . q_i . <q_i, s>
-    This is O(N . d) per matrix-vector product, far cheaper than O(d²).
+    in full (d^2 could be 16 MB at d=2048). Instead computed on the fly:
+        F . s = Sigma_i w_i . q_i . <q_i, s>
+    This is O(N . d) per matrix-vector product, far cheaper than O(d^2).
     """
 
     def __init__(self, name, d):
@@ -73,7 +73,7 @@ class BasinField:
         return _normalize(self._center.astype(np.complex64))
 
     def apply(self, s):
-        """Compute F . s = Σ_i w_i . q_i . <q_i, s>."""
+        """Compute F . s = Sigma_i w_i . q_i . <q_i, s>."""
         if not self._mems:
             return np.zeros(self.d, dtype=np.complex64)
         out = np.zeros(self.d, dtype=np.complex64)
@@ -99,7 +99,7 @@ class SACField:
     populate(name, examples)     -> add example HVs to basin
     classify(s, top_k=1)         -> top-k basins by attractor alignment
     descend(s, steps=20, eta=...) -> gradient-descend in current basin-weighted field
-    converge(query)              -> full pipeline: classify + descend -> s_∞
+    converge(query)              -> full pipeline: classify + descend -> s_inf
     """
 
     def __init__(self, d=2048, temperature=1.0):
@@ -168,7 +168,7 @@ class SACField:
 
     def gradient(self, s):
         """
-        ∇E(s) = -Σ_k w_k(s) . (F_k . s)
+        gradE(s) = -Sigma_k w_k(s) . (F_k . s)
         Where w_k(s) is softmax over basin alignments.
         """
         weights = self.basin_weights(s)

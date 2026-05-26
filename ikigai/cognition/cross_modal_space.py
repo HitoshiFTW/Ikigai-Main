@@ -4,9 +4,9 @@ ikigai.cognition.cross_modal_space -- Unified Cross-Modal VSA Space.
 Day 55 Pack 61 -- #4: vision/audio/text in one d-dimensional bipolar HV space.
 
 Architecture:
-    Text:   token sequence -> position-sensitive bundle -> ±1 HV
-    Vision: pixel patch (H×W floats) -> random projection -> sign -> ±1 HV
-    Audio:  frequency spectrum (N bins) -> random projection -> sign -> ±1 HV
+    Text:   token sequence -> position-sensitive bundle -> +/-1 HV
+    Vision: pixel patch (H*W floats) -> random projection -> sign -> +/-1 HV
+    Audio:  frequency spectrum (N bins) -> random projection -> sign -> +/-1 HV
 
 Concept storage:
     concept_hv = bundle(text_hv, vision_hv, audio_hv)
@@ -79,7 +79,7 @@ def encode_text(tokens, d):
 
 def encode_vision(patch, d, seed=1001):
     """
-    Pixel patch -> ±1 HV via seeded random projection.
+    Pixel patch -> +/-1 HV via seeded random projection.
     patch: any-shape numpy array of floats, flattened internally.
     """
     flat = np.asarray(patch, dtype=np.float32).ravel()
@@ -89,7 +89,7 @@ def encode_vision(patch, d, seed=1001):
 
 def encode_audio(spectrum, d, seed=2002):
     """
-    Frequency spectrum (power per bin) -> ±1 HV via random projection.
+    Frequency spectrum (power per bin) -> +/-1 HV via random projection.
     spectrum: 1-D array of floats.
     """
     flat = np.asarray(spectrum, dtype=np.float32).ravel()

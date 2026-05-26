@@ -2,7 +2,7 @@
 ikigai.cognition.importance_decay -- Importance-Weighted Decay Lattice.
 
 Day 55 Pack 66 -- invention #6: bio-realistic forgetting curve.
-Half-life ∝ surprise × frequency. Important items persist; routine items fade.
+Half-life  surprise * frequency. Important items persist; routine items fade.
 
 Ebbinghaus forgetting curve: memory strength s(t) = s_0 * exp(-t / tau)
 Standard half-life tau is fixed. Bio reality: tau scales with importance.

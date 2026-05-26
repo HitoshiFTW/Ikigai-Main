@@ -93,7 +93,7 @@ def _cosine(a, b):
 
 class HolographicMemory:
     """
-    VSA crystal: bundle of (key ⊗ value) bindings.
+    VSA crystal: bundle of (key (x) value) bindings.
     O(1) recall via bind(crystal, query_key) + cosine match.
     """
 
@@ -111,7 +111,7 @@ class HolographicMemory:
 
     def store(self, name, key_tokens, value_tokens):
         """
-        Bind key ⊗ value and superpose into crystal.
+        Bind key (x) value and superpose into crystal.
         Overwrites previous binding for same name.
         """
         k_hv = _encode(key_tokens, self.d)
@@ -140,8 +140,8 @@ class HolographicMemory:
         """
         Raw dot-product recall scores against all stored values.
         Uses crystal_accum (int32) to preserve magnitude info.
-        recovered[p] = accum[p] * q[p] ≈ v_j[p] + noise  for q ≈ k_j
-        dot(recovered, v_j) ≈ d (signal) + eps (noise, mean 0)
+        recovered[p] = accum[p] * q[p] ~= v_j[p] + noise  for q ~= k_j
+        dot(recovered, v_j) ~= d (signal) + eps (noise, mean 0)
         SNR = d / sqrt(d*(N-1)) = sqrt(d/(N-1))
         """
         q = q_hv.astype(np.int32)

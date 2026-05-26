@@ -1,5 +1,5 @@
 """
-ikigai.cognition.pi_k_algebra -- Π_k Prime-Offset Permutation Family.
+ikigai.cognition.pi_k_algebra -- Pi_k Prime-Offset Permutation Family.
 
 Day 56 Pack 85 -- Pillar 2 of UHE.
 
@@ -8,17 +8,17 @@ Solves the bipolar-XOR-leakage problem (Pack 72 lesson):
     leaks BOTH s_{k+1} AND s_{k-1}.
 
 Solution: family of cyclic-shift permutations indexed by primes.
-    Π_k(x) = np.roll(x, p_k) where p_k is the k-th prime
-    Not involutive: Π_k(Π_k(x)) = roll(x, 2*p_k) ≠ x in general
-    Non-commutative: Π_j ∘ Π_k = roll(., p_j + p_k) ≠ Π_k ∘ Π_j (sequence matters)
-    Reversible: Π_k^{-1}(x) = np.roll(x, -p_k)
+    Pi_k(x) = np.roll(x, p_k) where p_k is the k-th prime
+    Not involutive: Pi_k(Pi_k(x)) = roll(x, 2*p_k) != x in general
+    Non-commutative: Pi_j o Pi_k = roll(., p_j + p_k) != Pi_k o Pi_j (sequence matters)
+    Reversible: Pi_k^{-1}(x) = np.roll(x, -p_k)
     Coprime stack: gcd(p_1, p_2, ..., p_K) = 1 -> 32-depth chains have full state separation
 
-Π-binding:
-    bind_Π_k(a, b) = Π_k(a) * b      (asymmetric)
-    unbind_Π_k(c, b) = Π_k^{-1}(c * b)   (since b*b = ±1 for bipolar / |b|² = 1 for phasor)
+Pi-binding:
+    bind_Pi_k(a, b) = Pi_k(a) * b      (asymmetric)
+    unbind_Pi_k(c, b) = Pi_k^{-1}(c * b)   (since b*b = +/-1 for bipolar / |b|^2 = 1 for phasor)
 
-Turing-completeness: state machine via Π chain with role/value/PC slots.
+Turing-completeness: state machine via Pi chain with role/value/PC slots.
 """
 
 import numpy as np
@@ -36,10 +36,10 @@ class PiK:
     """
     Family of prime-offset cyclic shifts on d-dim hypervectors.
 
-    pi(k, x)        -> Π_k(x)
-    pi_inv(k, x)    -> Π_k^{-1}(x)
-    bind(k, a, b)   -> Π_k(a) ⊙ b  (asymmetric)
-    unbind(k, c, b) -> Π_k^{-1}(c ⊙ conj(b))  (recovers a from c=bind(k,a,b))
+    pi(k, x)        -> Pi_k(x)
+    pi_inv(k, x)    -> Pi_k^{-1}(x)
+    bind(k, a, b)   -> Pi_k(a) * b  (asymmetric)
+    unbind(k, c, b) -> Pi_k^{-1}(c * conj(b))  (recovers a from c=bind(k,a,b))
     chain_bind(items) -> sequential bind with increasing k
 
     Supports both bipolar real and phasor complex HVs.
@@ -54,7 +54,7 @@ class PiK:
         self.n = len(self.primes)
 
     def pi(self, k, x):
-        """Π_k(x) = roll(x, p_k). k is 0-indexed into primes list."""
+        """Pi_k(x) = roll(x, p_k). k is 0-indexed into primes list."""
         return np.roll(x, self.primes[k % self.n], axis=-1)
 
     def pi_inv(self, k, x):
@@ -76,7 +76,7 @@ class PiK:
         return x  # real bipolar is self-conjugate
 
     def bind(self, k, a, b):
-        """Π_k(a) ⊙ b."""
+        """Pi_k(a) * b."""
         return self._mul(self.pi(k, a), b)
 
     def unbind(self, k, c, b):
@@ -86,7 +86,7 @@ class PiK:
     def chain_bind(self, *items):
         """
         Chain binding: bind(0, bind(1, ..., bind(n-1, items[0], items[1]), ...), items[n])
-        Each level uses a different Π_k. items: variadic HVs.
+        Each level uses a different Pi_k. items: variadic HVs.
         Returns final bound HV.
         """
         if not items:
@@ -110,7 +110,7 @@ class PiK:
     #  Turing-style state machine on top
 
     def stamp(self, hv, role_k):
-        """Mark hv with role index. role_k determines which Π applies."""
+        """Mark hv with role index. role_k determines which Pi applies."""
         return self.pi(role_k, hv)
 
     def unstamp(self, hv, role_k):

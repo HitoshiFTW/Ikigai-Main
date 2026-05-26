@@ -5,19 +5,19 @@ Day 56 Pack 84 -- Pillar 1 of UHE.
 Byte stream -> phasor state via state-dependent rotation flow.
 
 Foundation:
-    s ∈ ℂ^d, each component on unit circle.
-    Per-byte phase vector θ_c ∈ ℝ^d (random, fixed).
-    Per-byte coupling matrix Π_c (sparse cyclic shift with byte-specific stride).
+    s  in  C^d, each component on unit circle.
+    Per-byte phase vector theta_c  in  R^d (random, fixed).
+    Per-byte coupling matrix Pi_c (sparse cyclic shift with byte-specific stride).
 
 Flow:
-    α_t      = (1 + Re⟨s_t, R_phase⟩) / 2          // state projection [0, 1]
-    s_t+1    = Π_c . (s_t ⊙ exp(i.θ_c.(1 + γ.α_t)))   // rotate then shift
+    alpha_t      = (1 + Res_t, R_phase) / 2          // state projection [0, 1]
+    s_t+1    = Pi_c . (s_t * exp(i.theta_c.(1 + gamma.alpha_t)))   // rotate then shift
 
 Properties:
     - Same byte at different states -> different rotation magnitude (non-linear)
-    - Π_c shifts -> couples components (no longer elementwise)
+    - Pi_c shifts -> couples components (no longer elementwise)
     - State always on unit-phasor torus (unitary evolution)
-    - Byte stream -> continuous trajectory in ℂ^d
+    - Byte stream -> continuous trajectory in C^d
 
 vs standard VSA:
     Discrete codebook lookup => continuous integration
@@ -32,7 +32,7 @@ def _hv_for(key, d, dtype):
     """Deterministic random vector keyed by (key, d, dtype)."""
     rng  = np.random.default_rng(abs(hash((key, dtype))) % (2**31))
     if dtype == 'phase':
-        # Random phases ∈ [-π, π]
+        # Random phases  in  [-pi, pi]
         return rng.uniform(-np.pi, np.pi, size=d).astype(np.float32)
     elif dtype == 'shift':
         # Coprime-with-d stride
@@ -80,9 +80,9 @@ class CGPSPEncoder:
     gamma            : state-feedback gain (default 0.4)
     couple_mode      : 'shift' uses byte-specific cyclic shifts; 'none' = pure rotation
 
-    encode(text) -> ℂ^d phasor state (numpy complex64)
+    encode(text) -> C^d phasor state (numpy complex64)
     encode_bytes(b) -> same, from raw bytes
-    cosine(a, b) -> real cosine similarity in ℂ^d (uses Re⟨a,b̄⟩ / (||a|| ||b||))
+    cosine(a, b) -> real cosine similarity in C^d (uses Rea,b / (||a|| ||b||))
     """
 
     def __init__(self, d=2048, gamma=0.4, couple_mode='shift',
@@ -97,7 +97,7 @@ class CGPSPEncoder:
             cls: _hv_for(f'class_{cls}', self.d, 'phase')
             for cls in ('digit', 'letter', 'ws', 'punct', 'bracket', 'other')
         }
-        # Per-byte phase vectors θ_c = (1-w) * class_base + w * individual
+        # Per-byte phase vectors theta_c = (1-w) * class_base + w * individual
         # This means letters share most of their direction; differences are individual.
         individual = np.stack([
             _hv_for(f'theta_indiv_{c}', self.d, 'phase') for c in range(256)
@@ -126,7 +126,7 @@ class CGPSPEncoder:
 
     def _step(self, s, byte_val):
         """One CGPSP integration step: rotate then couple."""
-        # State projection α ∈ [0, 1]
+        # State projection alpha  in  [0, 1]
         alpha = (1.0 + float(np.real(np.vdot(self._R_phase, s))) / self.d) / 2.0
         # Per-byte phase rotation, scaled by (1 + gamma.alpha)
         scale = 1.0 + self.gamma * alpha
@@ -173,7 +173,7 @@ class CGPSPEncoder:
         # Undo rotation -- need same alpha that was used FORWARD.
         # Forward used alpha computed from PRE-step state. Recovering requires
         # iterating. For now we approximate using current-state alpha as
-        # close approximation (works when γ is small).
+        # close approximation (works when gamma is small).
         alpha = (1.0 + float(np.real(np.vdot(self._R_phase, s_rot))) / self.d) / 2.0
         scale = 1.0 + self.gamma * alpha
         theta = self._theta[byte_val] * scale

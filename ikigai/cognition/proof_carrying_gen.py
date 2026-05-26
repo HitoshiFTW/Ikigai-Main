@@ -182,7 +182,7 @@ class ProofCarryingGenerator:
         for rule_name, prem_tokens in zip(rule_sequence, premise_tokens_list):
             rule_hv     = self.add_rule(rule_name)
             prem_hv     = _encode(prem_tokens, self.d)
-            # Premise at step i = current state ⊕ new evidence
+            # Premise at step i = current state (+) new evidence
             step_premise = _bind(current, prem_hv)
             current      = chain.add_step(rule_name, rule_hv, step_premise)
 

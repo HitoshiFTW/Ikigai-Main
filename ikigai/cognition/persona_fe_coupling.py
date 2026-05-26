@@ -1,5 +1,5 @@
 """
-ikigai.cognition.persona_fe_coupling -- Persona × Free-Energy Coupling.
+ikigai.cognition.persona_fe_coupling -- Persona * Free-Energy Coupling.
 
 Day 55 Pack 75 -- Phase B: voice/style depends on internal FE state.
 
@@ -27,7 +27,7 @@ Bio: limbic system (mood) + prefrontal (deliberation) jointly shape behavior.
      Anxiety (high cortisol) -> more cautious responses.
 
 vs LLM: persona = prompt-engineered, brittle.
-        Persona×FE: emergent from internal state. Real-time adaptive.
+        Persona*FE: emergent from internal state. Real-time adaptive.
 """
 
 import numpy as np

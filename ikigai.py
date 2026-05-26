@@ -32,7 +32,7 @@ class Neuron:
         self.name = name
         self.voltage = 0.0
 
-        # 1️⃣ Structural Noise Heterogeneity & Asymmetric Hemispheres
+        # 1. Structural Noise Heterogeneity & Asymmetric Hemispheres
         if '-RH-' in name:
             self.threshold = threshold - 0.05 + random.uniform(-0.07, 0.07)
             noise_leak = random.uniform(-0.03, 0.03)
@@ -83,7 +83,7 @@ class Neuron:
         # Suppression = 0.25: creates winner-take-all dynamics that produce realistic
         # prediction-error conflicts when the losing motor still has high-magnitude input.
         # Biologically: BG/SNr inhibition provides strong thalamic suppression (~0.25 in
-        # normalized units), sufficient to block competing motor programs with input ∈ (0.65, 0.90)
+        # normalized units), sufficient to block competing motor programs with input  in  (0.65, 0.90)
         # while allowing conflict detection when both motors receive convergent drive.
         if self.name.endswith("Motor-001"):
             if getattr(Neuron, "_motor2_prev", False):
@@ -109,7 +109,7 @@ class Neuron:
         # and by divisive normalization in Synapse.transmit().
 
         self.voltage = self.voltage * self.leak + (inp * self.exc_gain)
-        # L24E S9: Intrinsic ion-channel noise -- σ=0.005 (Faisal 2008; Destexhe 2012)
+        # L24E S9: Intrinsic ion-channel noise -- sigma=0.005 (Faisal 2008; Destexhe 2012)
         self.voltage += random.gauss(0.0, 0.005)
         # L25B S4: Adenosine fatigue coupling -- sleep pressure weakens executive persistence
         fatigue_scale = 1.0 - (0.4 * Synapse.ado_level)
@@ -142,8 +142,8 @@ class Neuron:
             # adaptation to avoid cascading corrections (Turrigiano 2008)
             _scale = getattr(Synapse, '_N_scale', 1.0)
             eta = 0.0010 / _scale
-            # Faster rate estimation: tau ≈ 20 ticks -- detects underfiring within 40-60 ticks
-            # (was 0.99/0.01, tau ≈ 100 ticks -- too slow to correct within 1000-tick window)
+            # Faster rate estimation: tau ~= 20 ticks -- detects underfiring within 40-60 ticks
+            # (was 0.99/0.01, tau ~= 100 ticks -- too slow to correct within 1000-tick window)
             self.avg_rate = 0.95 * self.avg_rate + 0.05 * (1.0 if self.fired else 0.0)
             self.threshold += eta * (self.avg_rate - target_rate)
             # Relax toward baseline: alpha=0.0003, eta/alpha=3.3 (critically damped)
@@ -200,7 +200,7 @@ class Synapse:
     _global_pop_scale = 1.0  # Fix 3: divisive normalization for excitatory synapses (Carandini & Heeger 2012)
 
     def transmit(self):
-        # 1️⃣ Synaptic Failure Probability (Phase A/B)
+        # 1. Synaptic Failure Probability (Phase A/B)
         fail_prob = 0.15 if Synapse.ado_level > 0.8 else (0.10 if Synapse.ado_level > 0.6 else 0.05)
         if random.random() < fail_prob:
             return 0.0
@@ -216,7 +216,7 @@ class Synapse:
             else:
                 # Divisive normalization (Carandini & Heeger 2012)
                 # Full linear scaling: at N=100 (pop_scale=1.0) no change.
-                # At N=400 (pop_scale≈4.0): sig÷4.0, fully compensating N-scaling.
+                # At N=400 (pop_scale~=4.0): sig/4.0, fully compensating N-scaling.
                 pop_norm = type(self)._global_pop_scale
                 norm = 1.0 + 1.0 * max(0.0, pop_norm - 1.0)
                 sig = self.weight / norm
@@ -491,8 +491,8 @@ class CortisolSystem:
         self.max_historic = 0.1
         self.success_streak = 0
         self.spike_buffer = 0.0
-        self.high_cort_ticks = 0 # 5️⃣ Prevent Hormone Lock
-        self.last_amygdala_spike = -100 # 3️⃣ Amygdala refractory
+        self.high_cort_ticks = 0 # 5. Prevent Hormone Lock
+        self.last_amygdala_spike = -100 # 3. Amygdala refractory
     def update(self, out_fired, ne_elev, tick, rem_sleep=False, energy=1.0):
         if out_fired:
             self.fail_streak = 0
@@ -505,7 +505,7 @@ class CortisolSystem:
         if self.fail_streak > 15: self.level += 0.015
         if ne_elev > 30: self.level += 0.005
 
-        # 4️⃣ Add Energy-Coupled Hormonal Dampening
+        # 4. Add Energy-Coupled Hormonal Dampening
         if energy < 0.4:
             self.level *= 0.9
 
@@ -513,7 +513,7 @@ class CortisolSystem:
         if Synapse.ado_level > 0.6:
             self.level = max(self.setpoint + 0.05, self.level + 0.01)
 
-        # 5️⃣ Prevent Hormone Lock
+        # 5. Prevent Hormone Lock
         if self.level > 0.95:
             self.high_cort_ticks += 1
         else:
@@ -522,7 +522,7 @@ class CortisolSystem:
         if self.high_cort_ticks > 30:
             self.level *= 0.85
 
-        # 2️⃣ Add Spike Compression
+        # 2. Add Spike Compression
         if self.level > 0.8:
             self.level = 0.8 + (self.level - 0.8) * 0.3
 
@@ -548,7 +548,7 @@ class CortisolSystem:
                     t.weight *= 0.9995
                     self.dmg += t.weight * 0.0005
     def apply_homeostasis(self, tick=0):
-        # FIX 1: Corrected circadian baseline -- human resting cortisol is 0.15±0.08 (Pruessner 1997)
+        # FIX 1: Corrected circadian baseline -- human resting cortisol is 0.15+/-0.08 (Pruessner 1997)
         # 0.35 was elevated stress baseline; 0.15 = realistic tonic HPA setpoint
         baseline = 0.15 + 0.08 * math.sin(tick * 0.002)  # circadian
         decay_rate = 0.08
@@ -602,7 +602,7 @@ class OxytocinSystem:
         # Amplitude 0.02 -- lower than before since firing frequency increases without cort gate
         if out_fired and da_level > 0.3:
             self.level += 0.02
-        # Multiplicative decay every tick -- proportional clearance, tau ≈ 100 ticks
+        # Multiplicative decay every tick -- proportional clearance, tau ~= 100 ticks
         self.level *= 0.99
         self.trust = self.level > 0.6
         self.level = max(0.0, min(1.0, self.level))
@@ -964,7 +964,7 @@ class SelfModelSystem:
             if len(buf) > 50:
                 buf.pop(0)
 
-        # Slow EMA of actual state (τ ≈ 50 ticks)
+        # Slow EMA of actual state (tau ~= 50 ticks)
         k = 0.02
         self._ema_cort    = self._ema_cort    + k * (cortisol - self._ema_cort)
         self._ema_valence = self._ema_valence + k * (valence  - self._ema_valence)
@@ -1124,7 +1124,7 @@ class VagalInteroceptionSystem:
          Damasio 1999: somatic markers bias threat evaluation
 
     All state variables bounded in [0, 1].
-    Low-frequency dynamics (≤0.01/tick) preserve simulation stability.
+    Low-frequency dynamics (<=0.01/tick) preserve simulation stability.
     """
     def __init__(self):
         self.heart_rate  = 0.5   # peripheral cardiac arousal [0, 1]
@@ -1157,7 +1157,7 @@ class VagalInteroceptionSystem:
         # SWS sleep boosts parasympathetic tone (Porges 2007)
         if sleep_phase == 'SWS':
             self.vagal_tone = min(1.0, self.vagal_tone + 0.01)
-        # Oxytocin: social safety increases vagal tone (Uvnäs-Moberg 2003)
+        # Oxytocin: social safety increases vagal tone (Uvnas-Moberg 2003)
         self.vagal_tone = min(1.0, self.vagal_tone + oxytocin * 0.002)
         # Cortisol: chronic stress suppresses vagal tone (McEwen 1998)
         self.vagal_tone = max(0.0, self.vagal_tone - cortisol * 0.002)
@@ -1196,7 +1196,7 @@ class HomeostasisSystem:
     Mathematical foundation (Cannon 1932 / Sterling & Eyer 1988):
         Deviation:         D_i  = x_i - x*_i
         Drive strength:    d_i  = |D_i|  (clipped to [0,1])
-        Global imbalance:  E    = Σ w_i * |x_i - x*_i|
+        Global imbalance:  E    = Sigma w_i * |x_i - x*_i|
 
     Five primary drives:
         hunger    -- energy below setpoint        (explore/forage)
@@ -1209,15 +1209,15 @@ class HomeostasisSystem:
         sleep onset: sleep_drive > SLEEP_ONSET_THRESHOLD  (0.70)
         sleep end:   sleep_drive < SLEEP_OFFSET_THRESHOLD (0.30)
         Replaces hard tick-counter (SLEEP_START/SLEEP_END) with
-        physiological sleep pressure, matching the Borbély two-process
-        model (Borbély 1982): sleep pressure rises with adenosine
+        physiological sleep pressure, matching the Borbely two-process
+        model (Borbely 1982): sleep pressure rises with adenosine
         accumulation (Process S) and falls during sleep (clearance).
 
     All outputs bounded in [0, 1].
     Setpoints updated ONLY through AllostasisSystem -- never directly here.
     """
 
-    # --- Sleep pressure thresholds (Borbély 1982 Process S) ---
+    # --- Sleep pressure thresholds (Borbely 1982 Process S) ---
     SLEEP_ONSET_THRESHOLD  = 0.30   # Process S threshold (gate is Process C -- see should_sleep_onset)
     SLEEP_OFFSET_THRESHOLD = 0.30   # sleep_drive below this -> sleep ends
     # Minimum waking ticks before sleep is allowed (prevents rapid oscillations)
@@ -1232,7 +1232,7 @@ class HomeostasisSystem:
             "adenosine": 0.20,   # preferred adenosine (rested state)
         }
 
-        # --- Regulatory importance weights (Σ w_i = 1.0) ---
+        # --- Regulatory importance weights (Sigma w_i = 1.0) ---
         self.weights = {
             "energy":    0.30,
             "cortisol":  0.30,
@@ -1265,7 +1265,7 @@ class HomeostasisSystem:
         cortisol         : float [0,1] -- cort.level
         oxytocin         : float [0,1] -- oxt.level
         adenosine        : float [0,1] -- ado.level
-        prediction_error : float ≥0   -- pp.error (prediction error magnitude)
+        prediction_error : float >=0   -- pp.error (prediction error magnitude)
         """
         sp = self.setpoints
 
@@ -1289,7 +1289,7 @@ class HomeostasisSystem:
         # curiosity: proportional to prediction error (Friston 2010 free energy)
         self.drives["curiosity"] = max(0.0, min(1.0, prediction_error))
 
-        # --- Global imbalance E = Σ w_i * |x_i - x*_i| ---
+        # --- Global imbalance E = Sigma w_i * |x_i - x*_i| ---
         weighted = (
             self.weights["energy"]    * abs(avg_energy - sp["energy"])
             + self.weights["cortisol"]  * abs(cortisol  - sp["cortisol"])
@@ -3472,9 +3472,9 @@ class ReflectiveReasoner:
 
     Reflection types
     ----------------
-    'stress_loop'           -- repeated 'challenge' arcs (≥ 3 of 5)
-    'successful_regulation' -- repeated 'stabilization' arcs (≥ 3 of 5)
-    'productive_exploration'-- repeated 'discovery' arcs (≥ 3 of 5)
+    'stress_loop'           -- repeated 'challenge' arcs (>= 3 of 5)
+    'successful_regulation' -- repeated 'stabilization' arcs (>= 3 of 5)
+    'productive_exploration'-- repeated 'discovery' arcs (>= 3 of 5)
     'transition_instability'-- alternating or mixed themes without majority
 
     Confidence trends
@@ -3507,7 +3507,7 @@ class ReflectiveReasoner:
     # Minimum arcs needed to produce a meaningful reflection
     _MIN_ARCS = 2
 
-    # Threshold for majority theme detection (≥ this fraction of arcs)
+    # Threshold for majority theme detection (>= this fraction of arcs)
     _MAJORITY_THRESH = 0.60   # 3 of 5 -> 0.60
 
     # Confidence trend sensitivity (absolute difference between halves)
@@ -4029,7 +4029,7 @@ class GoalExecutionBridge:
 
     Semantic bias blend
     -------------------
-    bias = plan.urgency × 0.70  +  concept_support_norm × 0.30
+    bias = plan.urgency * 0.70  +  concept_support_norm * 0.30
     where concept_support_norm = support(target_focus) / max_support
     (falls back to 0.0 if target_focus is None or graph is empty)
     Result clamped to [0.0, 1.0].
@@ -26666,7 +26666,7 @@ class BiasAdjustedDecisionModulator:
                 break
 
         bias   = float(bias_tbl.get(action_type, 0.0))
-        effect = bias * self.MAX_BIAS_EFFECT   # capped at ±0.10
+        effect = bias * self.MAX_BIAS_EFFECT   # capped at +/-0.10
 
         raw   = cal + effect
         final = max(0.0, min(1.0, raw))
@@ -27931,7 +27931,7 @@ class ConflictResolutionAnalyzer:
 
 class MultiDisturbanceScenarioRunner:
     """
-    Orchestrates four frozen conflict scenarios (Rule R1 -- each has ≥2 stressors).
+    Orchestrates four frozen conflict scenarios (Rule R1 -- each has >=2 stressors).
     Each run uses ConflictSignalInjector, ObjectiveCompetitionTracker,
     ConflictResolutionAnalyzer internally.
     Tick count bounded: TICK_MIN=500, TICK_MAX=2000 (Rule R2).
@@ -28163,9 +28163,9 @@ class CircadianSystem:
     Simulates the suprachiasmatic nucleus (SCN) circadian oscillator.
 
     phase: [0.0, 1.0) -- position in the 24-hour cycle.
-    speed: phase increment per tick (0.0005 -> full cycle ≈ 2000 ticks ≈ 24 h equivalent).
-    Sleep phase: phase > 0.65 (35% of cycle = wake-permitted window ≈ 8.4 h equivalent).
-    Wake phase: phase ≤ 0.65 (65% of cycle = maximum sleep suppression window).
+    speed: phase increment per tick (0.0005 -> full cycle ~= 2000 ticks ~= 24 h equivalent).
+    Sleep phase: phase > 0.65 (35% of cycle = wake-permitted window ~= 8.4 h equivalent).
+    Wake phase: phase <= 0.65 (65% of cycle = maximum sleep suppression window).
     """
 
     def __init__(self):
@@ -28189,7 +28189,7 @@ class CircadianSystem:
 
 # ===========================================================================
 # DAY 15 PART 2: PREDICTIVE SLEEP SYSTEM
-# Borbély 1982 (Two-Process Model), Friston 2010 (Active Inference),
+# Borbely 1982 (Two-Process Model), Friston 2010 (Active Inference),
 # Tononi & Cirelli 2014 (Synaptic Homeostasis Hypothesis)
 # ===========================================================================
 
@@ -28205,25 +28205,25 @@ class PredictiveSleepSystem:
     future surprise. Predicting impending fatigue and initiating sleep early
     minimizes the physiological cost of exhaustion-driven sleep onset.
 
-    Borbély Process S (adenosine accumulation) is tracked as a trend:
-        adenosine_trend = EMA(adenosine)   α=0.02 (slow)
-        energy_trend    = EMA(energy)      α=0.02
+    Borbely Process S (adenosine accumulation) is tracked as a trend:
+        adenosine_trend = EMA(adenosine)   alpha=0.02 (slow)
+        energy_trend    = EMA(energy)      alpha=0.02
 
     Predicted sleep pressure (PSP):
-        PSP = adenosine_trend + β × (1 - energy_trend)
+        PSP = adenosine_trend + beta * (1 - energy_trend)
 
-    where β = 0.60 weights energy depletion as an amplifier of sleep pressure.
+    where beta = 0.60 weights energy depletion as an amplifier of sleep pressure.
 
     Sleep onset: PSP > 0.65  (lower threshold than homeostatic 0.70,
                                allowing earlier anticipatory initiation)
-    Sleep end:   adenosine < 0.20  (Borbély clearance criterion)
+    Sleep end:   adenosine < 0.20  (Borbely clearance criterion)
 
     PSP is externally combined with homeostasis.sleep_drive via max() so
     whichever is stronger determines sleep onset. This ensures both reactive
     (adenosine-high) and predictive (trend-based) sleep pressure can trigger rest.
     """
 
-    EMA_ALPHA      = 0.05   # trend window (τ ~ 20 ticks; Day 19.6: faster to track adenosine dynamics)
+    EMA_ALPHA      = 0.05   # trend window (tau ~ 20 ticks; Day 19.6: faster to track adenosine dynamics)
     BETA           = 0.60   # energy depletion amplification coefficient
     ONSET_THRESH   = 0.65   # PSP threshold for predictive sleep onset
     OFFSET_ADENOSINE = 0.20 # adenosine level for sleep end
@@ -28241,10 +28241,10 @@ class PredictiveSleepSystem:
         adenosine : float [0,1] -- current adenosine level
         avg_energy: float [0,1] -- mean regional cortical energy
         """
-        α = self.EMA_ALPHA
+        alpha = self.EMA_ALPHA
         # EMA trend update
-        self.adenosine_trend = α * adenosine   + (1 - α) * self.adenosine_trend
-        self.energy_trend    = α * avg_energy  + (1 - α) * self.energy_trend
+        self.adenosine_trend = alpha * adenosine   + (1 - alpha) * self.adenosine_trend
+        self.energy_trend    = alpha * avg_energy  + (1 - alpha) * self.energy_trend
 
         # Predicted sleep pressure
         psp = self.adenosine_trend + self.BETA * (1.0 - self.energy_trend)
@@ -28284,30 +28284,30 @@ class SpatialNavigationSystem:
     GRID CELLS (entorhinal cortex -- Hafting et al. 2005):
         Fire in a hexagonal lattice across the environment.
         Activation pattern for cell k at position (x,y):
-            G_k(x,y) = cos(f.(x.cos(θ_k) + y.sin(θ_k) + φ_k))
+            G_k(x,y) = cos(f.(x.cos(theta_k) + y.sin(theta_k) + phi_k))
 
-        where f = spatial frequency, θ_k = orientation, φ_k = phase offset.
-        The cos projection onto three equally-spaced orientations (0°, 60°, 120°)
+        where f = spatial frequency, theta_k = orientation, phi_k = phase offset.
+        The cos projection onto three equally-spaced orientations (0deg, 60deg, 120deg)
         produces a hexagonal grid when combined.
 
     PLACE CELLS (hippocampus -- O'Keefe & Nadel 1978):
         Each place cell has a preferred location (x_i, y_i) and fires
         as a Gaussian function of distance from that location:
-            PC_i(x,y) = exp(−((x−x_i)² + (y−y_i)²) / (2σ²))
+            PC_i(x,y) = exp(-((x-x_i)^2 + (y-y_i)^2) / (2sigma^2))
 
-        where σ = place field radius (default 2.5 units).
+        where sigma = place field radius (default 2.5 units).
 
     SPATIAL NOVELTY:
         Familiarity at current position = mean place cell activation.
-        Novelty = 1 − familiarity.
+        Novelty = 1 - familiarity.
         High novelty (> 0.4) increases curiosity drive via HomeostasisSystem.
 
     MOVEMENT:
         Position drifts each tick following action selection:
             approach -> (+dx, 0)
-            withdraw -> (−dx, 0)
+            withdraw -> (-dx, 0)
             explore  -> random direction
-        Step size = 0.35 units/tick, bounded to ±100 in each axis.
+        Step size = 0.35 units/tick, bounded to +/-100 in each axis.
 
     All activations bounded to [0, 1]. No synaptic modification.
     """
@@ -28330,7 +28330,7 @@ class SpatialNavigationSystem:
             for _ in range(self.NUM_PLACE_CELLS)
         ]
 
-        # --- Grid cells: each has orientation θ and phase offset φ ---
+        # --- Grid cells: each has orientation theta and phase offset phi ---
         self.grid_cells = [
             {
                 'theta': (i / self.NUM_GRID_CELLS) * 3.14159,  # spread orientations
@@ -28344,7 +28344,7 @@ class SpatialNavigationSystem:
         # --- Spatial metrics ---
         self.place_activity        = 0.0   # mean place cell activation
         self.grid_phase            = 0.0   # mean grid cell activation
-        self.spatial_novelty       = 1.0   # 1 − familiarity
+        self.spatial_novelty       = 1.0   # 1 - familiarity
         self.novelty_history       = []    # last 20 novelty values
         self._visit_counts         = {}    # discretised position visit count
 
@@ -28385,22 +28385,22 @@ class SpatialNavigationSystem:
         # --- Grid cell activations (hexagonal lattice, Hafting 2005) ---
         gc_total = 0.0
         for gc in self.grid_cells:
-            f, θ, φ = gc['freq'], gc['theta'], gc['phi']
+            f, theta, phi = gc['freq'], gc['theta'], gc['phi']
             # Projection onto three hexagonal orientations
-            a1 = math.cos(f * (x * math.cos(θ)            + y * math.sin(θ)            + φ))
-            a2 = math.cos(f * (x * math.cos(θ + 2.094)    + y * math.sin(θ + 2.094)    + φ))
-            a3 = math.cos(f * (x * math.cos(θ + 4.189)    + y * math.sin(θ + 4.189)    + φ))
+            a1 = math.cos(f * (x * math.cos(theta)            + y * math.sin(theta)            + phi))
+            a2 = math.cos(f * (x * math.cos(theta + 2.094)    + y * math.sin(theta + 2.094)    + phi))
+            a3 = math.cos(f * (x * math.cos(theta + 4.189)    + y * math.sin(theta + 4.189)    + phi))
             act = max(0.0, (a1 + a2 + a3) / 3.0)          # [0,1] after normalisation
             gc['activation'] = act
             gc_total += act
         self.grid_phase = min(1.0, gc_total / max(1, self.NUM_GRID_CELLS))
 
         # --- Place cell activations (Gaussian fields, O'Keefe & Nadel 1978) ---
-        σ2 = self.PLACE_SIGMA ** 2
+        sigma2 = self.PLACE_SIGMA ** 2
         pc_total = 0.0
         for pc in self.place_cells:
             dist2 = (x - pc['x']) ** 2 + (y - pc['y']) ** 2
-            act = math.exp(-dist2 / (2 * σ2))
+            act = math.exp(-dist2 / (2 * sigma2))
             pc['activation'] = act
             pc_total += act
         self.place_activity = min(1.0, pc_total / max(1, self.NUM_PLACE_CELLS))
@@ -28435,7 +28435,7 @@ class SpatialNavigationSystem:
 
 # ===========================================================================
 # DAY 15 PART 4: EPISODIC REPLAY SYSTEM
-# Wilson & McNaughton 1994, Buzsáki 2015, Girardeau 2009
+# Wilson & McNaughton 1994, Buzsaki 2015, Girardeau 2009
 # ===========================================================================
 
 class EpisodicReplaySystem:
@@ -28444,7 +28444,7 @@ class EpisodicReplaySystem:
 
     During non-REM SWS sleep, CA3 place cell sequences that were active
     during waking are reactivated in temporally compressed sequences
-    (replay speed ≈ 10× waking, Wilson & McNaughton 1994).
+    (replay speed ~= 10* waking, Wilson & McNaughton 1994).
 
     This system:
     1. Buffers (x, y, valence, cortisol, curiosity) tuples during waking (FIFO, max 200).
@@ -28453,11 +28453,11 @@ class EpisodicReplaySystem:
        (sleep-dependent emotional regulation, Walker & van der Helm 2009).
     4. Generates symbolic dream tokens reflecting the replayed spatial experience.
 
-    Replay probability model (Borbély-inspired depth sensitivity):
-        P_replay = α × sleep_depth   (α = 0.05)
+    Replay probability model (Borbely-inspired depth sensitivity):
+        P_replay = alpha * sleep_depth   (alpha = 0.05)
 
     Replay selection weighting:
-        P(sequence) ∝ |valence| + cortisol   (salient memories replay more)
+        P(sequence)  |valence| + cortisol   (salient memories replay more)
     """
 
     MAX_BUFFER       = 200    # FIFO trajectory buffer size
@@ -28589,7 +28589,7 @@ class PlanningSystem:
     toward the highest-value path.
 
     Value function (Tolman 1948 cognitive map / RL-theory):
-        V = w1 × C + w2 × R − w3 × S
+        V = w1 * C + w2 * R - w3 * S
     where:
         C = curiosity reward (spatial novelty of path)
         R = expected reward  (from CognitiveMapSystem)
@@ -28597,7 +28597,7 @@ class PlanningSystem:
         w1 = 0.4, w2 = 0.4, w3 = 0.2
 
     Motor bias (soft influence, not override):
-        explore_drive += best_path_value × 0.2  (bounded to +0.30 max)
+        explore_drive += best_path_value * 0.2  (bounded to +0.30 max)
 
     Planning limited to 1 event per 5 ticks (refractory period).
     """
@@ -28702,16 +28702,16 @@ class CognitiveMapSystem:
     Node indexing uses a spatial grid at resolution 2.0 units.
     Connections not stored (graph topology is implicit from position adjacency).
 
-    Explored ratio = (visited nodes) / (total nodes within 10×10 grid)
+    Explored ratio = (visited nodes) / (total nodes within 10*10 grid)
 
     Reward estimate updated each visit:
-        reward_estimate = EMA(valence, α=0.15)
+        reward_estimate = EMA(valence, alpha=0.15)
 
     Provides get_reward(x, y) to PlanningSystem for path evaluation.
     """
 
     RESOLUTION     = 2.0   # spatial units per node cell
-    EMA_REWARD_α   = 0.15  # reward EMA smoothing
+    EMA_REWARD_alpha   = 0.15  # reward EMA smoothing
 
     def __init__(self):
         self.nodes           = {}   # {(cx,cy): {'visits': int, 'reward': float}}
@@ -28733,11 +28733,11 @@ class CognitiveMapSystem:
         node['visits'] += 1
         self.total_visits += 1
         # EMA reward update
-        node['reward'] = (self.EMA_REWARD_α * valence
-                          + (1 - self.EMA_REWARD_α) * node['reward'])
+        node['reward'] = (self.EMA_REWARD_alpha * valence
+                          + (1 - self.EMA_REWARD_alpha) * node['reward'])
         node['reward'] = max(-1.0, min(1.0, node['reward']))
         # Explored ratio: ratio of visited nodes to expected arena coverage
-        # Arena bounds ±100 at resolution 2.0 -> 100×100 = 10000 possible cells
+        # Arena bounds +/-100 at resolution 2.0 -> 100*100 = 10000 possible cells
         self.explored_ratio = min(1.0, len(self.nodes) / 10000.0)
 
     def get_reward(self, x, y):
@@ -28820,7 +28820,7 @@ class SomaticMarkerSystem:
             self.anticipatory_signal *= 0.8
 
         self.valence = 0.6 * self.last_valence + 0.4 * new_val
-        # L24E S4: Affective homeostasis -- ultra-slow centering dV/dt = -ε.V (Cabanac 1992)
+        # L24E S4: Affective homeostasis -- ultra-slow centering dV/dt = -eps.V (Cabanac 1992)
         self.valence += -1e-4 * self.valence
         if tension > 0.7: self.mode = "AVOID"
         elif self.valence > 0.5 and energy > 0.3: self.mode = "APPROACH"
@@ -32659,7 +32659,7 @@ for local_tick in range(TICKS):
     _wm_survival = {'explore': 0.0, 'approach': 0.0, 'withdraw': 0.0}
     _wm_avg_e = 0.5
     _wm_hunger = 0.0
-    # -- Day 15: Homeostatic sleep trigger (Borbély 1982 Process S) --
+    # -- Day 15: Homeostatic sleep trigger (Borbely 1982 Process S) --
     # Replaces SLEEP_START/SLEEP_END tick counter with adenosine-driven sleep pressure.
     # Same sleep transition callbacks are preserved so all downstream systems work unchanged.
     _prev_sleeping = sleeping if 'sleeping' in dir() else False
@@ -33208,7 +33208,7 @@ for local_tick in range(TICKS):
             # Phase 4: Success probability -- effort-based decision making
             # Salamone & Correa 2002 (BG effort); Niv et al. 2007 (DA vigor); Brown & Kotler 2004
             # Base locomotion cost always paid; gain is uncertain -- scales with current capacity
-            # E[gain] = success_prob × base_gain; reward is NOT deterministic
+            # E[gain] = success_prob * base_gain; reward is NOT deterministic
             _success_prob = min(1.0, e / 0.25)
             _approach_ec = -0.020 + _success_prob * hunger * 0.10
             _ec = {'explore': -0.030, 'approach': _approach_ec, 'withdraw': 0.010}
@@ -33558,7 +33558,7 @@ for local_tick in range(TICKS):
         narrative.update_minimal_self(tick,no.fired,fs);mirror.update(no.fired,fs>0.3,tick)
         es=sum(n.fired for n in exc_n);ii=sum(n.fired for n in inh_n);ei.update(es,ii,inh_s,n_exc=len(exc_n),n_inh=len(inh_n))
 
-        # 1️⃣ Phase A: Energy Is Not Global -- Make It Regional
+        # 1. Phase A: Energy Is Not Global -- Make It Regional
         c_spikes = sum(1 for n in cortex_n if n.fired)
         l_spikes = sum(1 for n in limbic_n if n.fired)
         m_spikes = sum(1 for n in motor_n if n.fired)
@@ -36102,7 +36102,7 @@ for local_tick in range(TICKS):
                     _s.weight += _TURNOVER_EPS * (_s.initial_weight - _s.weight)
                     _s.weight = max(_s.weight_min, min(_s.weight_max, _s.weight))
                 # L24E S1: Homeostatic Synaptic Scaling (SHY -- Tononi & Cirelli 2006)
-                # Δw = η.(Ca_target − Ca_current).w, excitatory only, SWS only.
+                # Deltaw = eta.(Ca_target - Ca_current).w, excitatory only, SWS only.
                 _CA_TARGET = 0.3; _ETA_SCALE = 0.0005
                 for s in exc_s:
                     if not s.inhibitory:
@@ -36181,8 +36181,8 @@ for local_tick in range(TICKS):
         # Law 1: Active metabolic restoration during sleep (Benington & Heller 1995;
         # Tononi & Cirelli 2014; Xie et al. 2013 -- glymphatic clearance).
         # Astrocyte glycogen replenishment and ATP recovery accelerate during SWS.
-        # Rates: cortex 0.005 (8.3×), limbic 0.008 (13.3×), motor 0.010 (16.7×)
-        # vs passive wake recovery beta*(1-E) ≈ 0.0006/tick at E=0.5 -> all exceed 5× target.
+        # Rates: cortex 0.005 (8.3*), limbic 0.008 (13.3*), motor 0.010 (16.7*)
+        # vs passive wake recovery beta*(1-E) ~= 0.0006/tick at E=0.5 -> all exceed 5* target.
         l23.energy['cortex'] = min(1.0, l23.energy['cortex'] + 0.005)
         l23.energy['limbic'] = min(1.0, l23.energy['limbic'] + 0.008)
         l23.energy['motor']  = min(1.0, l23.energy['motor']  + 0.010)

@@ -115,7 +115,7 @@ class VSACalculus:
 
     def grad_bundle(self, hvs, target_idx):
         """
-        ∂bundle(hvs)/∂hvs[target_idx].
+        dbundle(hvs)/dhvs[target_idx].
         Position p is decisive: removing hvs[target_idx] at p changes the bundle output.
         Computed exactly: compare bundle_with vs bundle_without at each position.
         Returns binary mask (1.0 where decisive, 0.0 elsewhere).

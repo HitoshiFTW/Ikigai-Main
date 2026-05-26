@@ -5,7 +5,7 @@ Day 55 Pack 65 -- invention #9: behavior trace -> program HV.
 
 Forward compilation:
     program_tokens -> program_hv (encoded VSA)
-    program_hv ⊕ input_hv -> output_hv  (forward execution)
+    program_hv (+) input_hv -> output_hv  (forward execution)
 
 Inverse compilation:
     Given many (input_i, output_i) examples,
@@ -132,7 +132,7 @@ class InverseCompiler:
     def induce(self, io_examples):
         """
         From (input, output) pairs, induce aggregate program HV.
-        program_hv ≈ sign(sum over i of bind(input_i, output_i)).
+        program_hv ~= sign(sum over i of bind(input_i, output_i)).
         """
         if not io_examples:
             return np.zeros(self.d, dtype=np.float32)

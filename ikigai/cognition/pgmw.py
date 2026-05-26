@@ -6,7 +6,7 @@ Day 56 Pack 86 -- Pillar 3 of UHE.
 Same memory matrix M. Different lens p (persona) -> different retrieval.
 
 Mathematical core:
-    persona p ∈ ℂ^d (unit norm)
+    persona p  in  C^d (unit norm)
     warped metric: M(p) = I + lambda * (p p^H - I/d)
     warped inner product: <x, y>_p = x^H M(p) y
                                    = x^H y + lambda * (<x,p><p,y> - <x,y>/d)

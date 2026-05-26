@@ -41,7 +41,7 @@ python experiments/day58_pack132_few_shot.py
 ## Headline claims (each backed by a runnable experiment)
 
 - **Zero catastrophic forgetting** -- 5 original facts retained at 100% after 5,000+ distractor writes across text, arithmetic, and vision channels. (`day58_pack129_no_forgetting.py`)
-- **Continual learning that beats a CNN by 9.2× on Split-MNIST** -- flatmem 92% vs CNN 10%, no replay buffer, no retraining.
+- **Continual learning that beats a CNN by 9.2* on Split-MNIST** -- flatmem 92% vs CNN 10%, no replay buffer, no retraining.
 - **Multi-hop structural reasoning** -- 5-hop chains (`cat -> mammal -> forest -> river -> water -> cold`) via role-binding, not prompt iteration. (`day58_pack133_multihop.py`)
 - **O(1) per-token generation** -- `org.cogitate(prompt, max_tokens)` generates with constant RAM regardless of output length. Thought-state is a single hypervector that evolves through the substrate. No KV cache, no context window. (`day58_pack135_generation_engine.py`)
 - **Online learning mid-generation** -- inject a fact while generating, the next tokens reflect it. No fine-tuning, no RAG.

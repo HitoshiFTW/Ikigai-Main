@@ -479,11 +479,11 @@ def preprocess_relational(text):
             else:
                 extra.append(str(val))
 
-    # "twice as many/much" -> find following/preceding number, inject ×2
+    # "twice as many/much" -> find following/preceding number, inject *2
     m = re.search(r'twice\s+as\s+(?:many|much)(?:\s+as)?\s+(\d+)', t)
     if m: extra.append(str(int(m.group(1)) * 2))
 
-    # "half as many/much/that" -> find following/preceding number, inject ÷2
+    # "half as many/much/that" -> find following/preceding number, inject /2
     m = re.search(r'half\s+(?:as\s+(?:many|much)|that\s+much)(?:\s+as)?\s+(\d+)', t)
     if m: extra.append(str(int(m.group(1)) // 2))
     # also: "half that much" after a number

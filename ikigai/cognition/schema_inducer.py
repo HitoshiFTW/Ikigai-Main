@@ -26,7 +26,7 @@ No forgetting: observe() is append-only. Support count monotone.
 Day 60 benchmark:
      5 examples of 'list_filter' -> schema = ['result', 'for', 'x', 'in', SLOT, 'if', SLOT]
      apply('my_list', 'my_pred') -> ['result', 'for', 'x', 'in', 'my_list', 'if', 'my_pred']
-     20 patterns × 5 examples -> 20 schemas, all generalize correctly.
+     20 patterns * 5 examples -> 20 schemas, all generalize correctly.
      Never forgets schema 1 after learning schema 20.
 """
 

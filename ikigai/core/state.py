@@ -283,7 +283,7 @@ class IkigaiContext:
         # Tokens appearing in similar contexts -> similar semantic HVs.
         # enable_semantic_hv=True -> token_hv_for() returns semantic HV instead of random.
         self.enable_semantic_hv   = False  # gate: use co-occurrence HVs
-        self.semantic_hv_window   = 3      # context window radius (±window tokens)
+        self.semantic_hv_window   = 3      # context window radius (+/-window tokens)
         self.semantic_hv_counts   = {}     # {token: list[int]} -- running bit counts for majority vote
         self.semantic_hv_n        = {}     # {token: int} -- total context HVs bundled
         self.semantic_hv          = {}     # {token: bytearray} -- finalized binary semantic HV
