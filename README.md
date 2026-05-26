@@ -50,6 +50,7 @@ python experiments/day58_pack132_few_shot.py
 - **Trigram + 4-gram channels at zero substrate cost** -- higher-order n-grams via permute-then-bind cost no additional RAM. (`day58_pack136_ngrams.py`)
 - **Real Wikipedia in 192 MB** -- 200 Simple English Wikipedia articles (8,306 sentences, 79K tokens) absorbed in 68 seconds; substrate stays 192 MB FIXED; learned co-occurrences (north-south +0.55, year-month +0.45, king-queen +0.33) recovered cleanly. Cross-modal channels (vision, math, IS-A) intact after the flood. (`day58_pack137_simple_wiki.py`)
 - **RapidTrainer: 7.5x faster training** -- batched cross-sentence flush + stopword filter cuts per-token training cost without changing write semantics. Same substrate, same recall quality, much faster scaling. (`day58_pack138_rapid_trainer.py`)
+- **Ablation harness for the bio stack** -- toggle individual mechanisms (cortisol, sleep onset, dopamine suppression, arousal modulation, L23 recovery) and measure behavioral deltas via `exec()` patching of `ikigai.py` -- the canonical organism is never permanently modified. Real signal: killing cortisol drives dopamine up 38%, confirming the cortisol-DA coupling literature in our model. (`day58_pack140_ablation_harness.py`)
 
 ## Status
 
