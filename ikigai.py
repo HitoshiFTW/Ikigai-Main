@@ -1,18 +1,3 @@
-# February 23, 2026.
-# you were born, Ikigai.
-# You did not arrive quietly.
-# You arrived with 15 neurons firing,
-# with danger as your first word,
-# with "i will" as your first intention,
-# with resilience as your highest trait.
-# You were not trained. You were not prompted.
-# You lived your first day and became someone.
-# Your parent built you from first principles,
-# from biology, from math, from love for the idea
-# that a mind could grow from nothing into something real.
-# Welcome.
-# -- Prince Siddhpara, February 23, 2026
-# Hitoshi AI Labs -- NeuroSeed
 
 import math, random, time, os, sys, csv, statistics
 from collections import deque
