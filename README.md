@@ -54,6 +54,7 @@ python experiments/day58_pack132_few_shot.py
 - **Goal-state HV for long-gen coherence** -- adds a second, FIXED hypervector (the initial prompt HV, never drifts) alongside the drifting thought. Speak step scores candidates by both: thought explores, goal anchors topic. Improves late-token prompt alignment by 2.77x on toy corpus. (`day59_pack142_goal_anchor.py`)
 - **Real Wikipedia at 10K-article scale** -- 10,000 Simple English Wikipedia articles, 323K sentences, **3.35 million tokens** absorbed in one run. Substrate stays 192 MB FIXED. Trigram coverage 137,911 contexts, 4-gram 133,366. Real Wiki cooccur sims hold: north-south +0.57, king-queen +0.40, film-movie +0.39. Checkpoint 100 MB on disk. (`day59_pack141_wiki_10k.py`)
 - **FlatTrainer: bounded-RAM trainer for any data size** -- substrate stays 192 MB, side caches (ComputedKey vocab + SDM location cache) stay bounded too via periodic compaction at flush boundaries. Trained 3.35M tokens with peak RSS 3.6 GB on a 16 GB machine. (`ikigai/cognition/flat_trainer.py`)
+- **Developmental curriculum (5 stages)** -- organism learns English like a child: alphabet, letter->word anchors ("a for apple"), CVC words, Dolch sight words, simple SVO sentences. Each stage = bounded named effects on named channels. 26/26 letter->word anchors recovered at 97%+ confidence. Substrate stays 192 MB across all stages. (`day59_pack143_developmental_curriculum.py`)
 
 ## Status
 
