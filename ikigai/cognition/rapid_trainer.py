@@ -114,13 +114,25 @@ class RapidTrainer:
     def _flush_cooccur(self, batch):
         d = self.mr.d
         w = self.cooccur_w
+        ck = self.mr.ck
+        # Pre-warm: collect every unique token across the batch and ensure
+        # they're all in ck cache via one batched call.  Cheaper than
+        # per-token ck.key() inside the sentence loop.
+        unique_toks = set()
+        for tokens in batch:
+            unique_toks.update(tokens)
+        if hasattr(ck, 'key_batch'):
+            key_map = ck.key_batch(unique_toks)
+        else:
+            key_map = {t: ck.key(t) for t in unique_toks}
+
         agg = {}
         order = []
         for tokens in batch:
             n = len(tokens)
             if n < 2:
                 continue
-            K = np.stack([self.mr.ck.key(t) for t in tokens])
+            K = np.stack([key_map[t] for t in tokens])
             P = np.empty((n + 1, d), dtype=np.complex128)
             P[0] = 0
             P[1:] = np.cumsum(K.astype(np.complex128), axis=0)
@@ -139,7 +151,7 @@ class RapidTrainer:
         if not order:
             return
         rolev = self.mr.roles['cooccur']
-        ukeys = np.stack([self.mr._bind(self.mr.ck.key(t), rolev) for t in order])
+        ukeys = np.stack([self.mr._bind(key_map[t], rolev) for t in order])
         slots = [self.mr._slot(t, 'cooccur') for t in order]
         locs = self.mr.sdm.locs_batch(ukeys, slots)
         for t, idx in zip(order, locs):
@@ -150,6 +162,16 @@ class RapidTrainer:
         mr = self.mr
         rolev = mr.roles[role]
         bank = mr._bank(role)
+        ck = mr.ck
+        # Pre-warm all unique tokens in batch (same trick as cooccur)
+        unique_toks = set()
+        for tokens in batch:
+            unique_toks.update(tokens)
+        if hasattr(ck, 'key_batch'):
+            key_map = ck.key_batch(unique_toks)
+        else:
+            key_map = {t: ck.key(t) for t in unique_toks}
+
         agg_data = {}
         slot_to_ctx_hv = {}
         order = []
@@ -160,7 +182,7 @@ class RapidTrainer:
                 ctx = tokens[i - n_ctx:i]
                 curr = tokens[i]
                 slot = '|'.join(ctx) + f'\x00{role}'
-                curr_key = mr.ck.key(curr)
+                curr_key = key_map[curr]
                 if slot in agg_data:
                     agg_data[slot] = agg_data[slot] + curr_key
                 else:

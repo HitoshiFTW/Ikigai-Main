@@ -52,6 +52,8 @@ python experiments/day58_pack132_few_shot.py
 - **RapidTrainer: 7.5x faster training** -- batched cross-sentence flush + stopword filter cuts per-token training cost without changing write semantics. Same substrate, same recall quality, much faster scaling. (`day58_pack138_rapid_trainer.py`)
 - **Ablation harness for the bio stack** -- toggle individual mechanisms (cortisol, sleep onset, dopamine suppression, arousal modulation, L23 recovery) and measure behavioral deltas via `exec()` patching of `ikigai.py` -- the canonical organism is never permanently modified. Real signal: killing cortisol drives dopamine up 38%, confirming the cortisol-DA coupling literature in our model. (`day58_pack140_ablation_harness.py`)
 - **Goal-state HV for long-gen coherence** -- adds a second, FIXED hypervector (the initial prompt HV, never drifts) alongside the drifting thought. Speak step scores candidates by both: thought explores, goal anchors topic. Improves late-token prompt alignment by 2.77x on toy corpus. (`day59_pack142_goal_anchor.py`)
+- **Real Wikipedia at 10K-article scale** -- 10,000 Simple English Wikipedia articles, 323K sentences, **3.35 million tokens** absorbed in one run. Substrate stays 192 MB FIXED. Trigram coverage 137,911 contexts, 4-gram 133,366. Real Wiki cooccur sims hold: north-south +0.57, king-queen +0.40, film-movie +0.39. Checkpoint 100 MB on disk. (`day59_pack141_wiki_10k.py`)
+- **FlatTrainer: bounded-RAM trainer for any data size** -- substrate stays 192 MB, side caches (ComputedKey vocab + SDM location cache) stay bounded too via periodic compaction at flush boundaries. Trained 3.35M tokens with peak RSS 3.6 GB on a 16 GB machine. (`ikigai/cognition/flat_trainer.py`)
 
 ## Status
 

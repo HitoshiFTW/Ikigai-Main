@@ -75,6 +75,13 @@ class ComputedKey:
         self.seed = int(seed)
         self.word_weight = float(word_weight)
         self._cache = {}
+        # trigram cache: char-trigrams form a tiny finite set (~5K-15K seen
+        # in any English corpus).  Caching them separately means whole-word
+        # cache eviction is cheap -- trigrams stay memoized, recomputing a
+        # whole word becomes ~5 dict lookups + sum, not 5 SHA256+rng+exp.
+        # Bounded by alphabet^3 in the worst case (~50K for [a-z0-9']),
+        # roughly 200 MB upper bound but typically <30 MB.
+        self._trigram_cache = {}
 
     def _seeded_phasor(self, tag):
         h = hashlib.sha256(f'{tag}:{self.seed}'.encode()).digest()
@@ -84,7 +91,11 @@ class ComputedKey:
         return np.exp(1j * ph).astype(np.complex64)
 
     def _trigram_vec(self, tg):
-        return self._seeded_phasor(tg)
+        v = self._trigram_cache.get(tg)
+        if v is None:
+            v = self._seeded_phasor(tg)
+            self._trigram_cache[tg] = v
+        return v
 
     def _word_vec(self, word):
         return self._seeded_phasor(f'WORD:{word}')
@@ -103,8 +114,55 @@ class ComputedKey:
         self._cache[word] = k
         return k
 
+    def key_batch(self, words):
+        """
+        Vectorized key computation across many words.  Returns a dict
+        {word: hv}.  Cheaper than per-word key() because:
+          - cache hits skipped immediately,
+          - trigrams unique-ified across the batch (one _trigram_vec call
+            per unique trigram, not per word),
+          - whole-word phasors still per-word (SHA256+rng is unique seed),
+            but only computed for misses.
+        Hot path for FlatRapidTrainer.
+        """
+        out = {}
+        miss = []
+        for w in words:
+            v = self._cache.get(w)
+            if v is None:
+                miss.append(w)
+            else:
+                out[w] = v
+        if not miss:
+            return out
+
+        # Collect unique trigrams across misses
+        word_to_tgs = {}
+        seen_tgs = set()
+        for w in miss:
+            ww = f'#{w}#'
+            tgs = [ww[i:i+3] for i in range(len(ww) - 2)] or [ww]
+            word_to_tgs[w] = tgs
+            seen_tgs.update(tgs)
+        # Force trigram cache to absorb all unique trigrams once
+        for tg in seen_tgs:
+            if tg not in self._trigram_cache:
+                self._trigram_cache[tg] = self._seeded_phasor(tg)
+
+        # Now compose each missing word from cached trigrams + word phasor
+        for w in miss:
+            accum = np.zeros(self.d, dtype=np.complex64)
+            for tg in word_to_tgs[w]:
+                accum += self._trigram_cache[tg]
+            if self.word_weight:
+                accum += self.word_weight * self._word_vec(w)
+            k = _renorm(accum)
+            self._cache[w] = k
+            out[w] = k
+        return out
+
     def __getstate__(self):
-        # Drop the regenerable cache from pickle; keys recompute on demand.
+        # Drop both caches from pickle; both are regenerable accelerators.
         return {'d': self.d, 'seed': self.seed, 'word_weight': self.word_weight}
 
     def __setstate__(self, s):
@@ -112,6 +170,8 @@ class ComputedKey:
         # Backward-compat: older pickles lack word_weight (Pack <120) -- those
         # were built with word_weight=0 implicitly, so restore as such.
         self.word_weight = float(s.get('word_weight', 0.0))
+        self._cache = {}
+        self._trigram_cache = {}
         self._cache = {}
 
 
