@@ -399,7 +399,8 @@ class IkigaiOrganism:
                  momentum=0.7, thought_gamma=4.0, temperature=0.7,
                  top_k=20, remove_common=True, return_trace=False, seed=None,
                  ngram_weights=(0.2, 0.4, 0.4), ngram_ctx=3,
-                 goal_gamma=0.0):
+                 goal_gamma=0.0,
+                 grounded_gamma=0.0, grounded_roles=('isa', 'property')):
         """
         Flat-memory generation engine (Pack 135).
 
@@ -422,9 +423,11 @@ class IkigaiOrganism:
         eng.temperature   = float(temperature)
         eng.top_k         = int(top_k)
         eng.remove_common = bool(remove_common)
-        eng.ngram_weights = tuple(ngram_weights)
-        eng.ngram_ctx     = int(ngram_ctx)
-        eng.goal_gamma    = float(goal_gamma)
+        eng.ngram_weights   = tuple(ngram_weights)
+        eng.ngram_ctx       = int(ngram_ctx)
+        eng.goal_gamma      = float(goal_gamma)
+        eng.grounded_gamma  = float(grounded_gamma)
+        eng.grounded_roles  = tuple(grounded_roles)
         return eng.generate(prompt=prompt, max_tokens=max_tokens,
                             return_trace=return_trace, seed=seed)
 

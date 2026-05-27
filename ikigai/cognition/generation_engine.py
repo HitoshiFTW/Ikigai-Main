@@ -74,12 +74,22 @@ class GenerationEngine:
                               Thought drifts via momentum; goal anchors the
                               speak step toward prompt-topic across long gen.
                               0.0 = off (pre-Pack-142 behaviour).
+      grounded_gamma       - Pack 146: strength of grounded-semantics boost.
+                              Pulls speak toward candidates that share isa
+                              parents / properties with the last token, when
+                              such meaning is stored in the substrate. Falls
+                              back gracefully for words with no meaning data.
+                              0.0 = off (pre-Pack-146 behaviour).
+      grounded_roles       - which roles to consult for grounded scoring.
+                              Default ('isa', 'property'). Each role's
+                              recall is summed into a meaning context HV.
     """
 
     def __init__(self, organism, think_steps=3, momentum=0.7,
                  thought_gamma=4.0, temperature=0.7, top_k=20,
                  remove_common=True, ngram_weights=(0.2, 0.4, 0.4),
-                 ngram_ctx=3, goal_gamma=0.0):
+                 ngram_ctx=3, goal_gamma=0.0,
+                 grounded_gamma=0.0, grounded_roles=('isa', 'property')):
         self.org = organism
         self.think_steps = int(think_steps)
         self.momentum = float(momentum)
@@ -90,6 +100,8 @@ class GenerationEngine:
         self.ngram_weights = tuple(ngram_weights)
         self.ngram_ctx = int(ngram_ctx)
         self.goal_gamma = float(goal_gamma)
+        self.grounded_gamma = float(grounded_gamma)
+        self.grounded_roles = tuple(grounded_roles)
         self.thought = None
         self.goal = None
         self.thought_trace = []
@@ -119,7 +131,49 @@ class GenerationEngine:
             self.momentum * self.thought + (1.0 - self.momentum) * resp)
         self.thought_trace.append(self.thought.copy())
 
-    #  one speak step: n-gram-combined + thought-aligned softmax
+    #  Pack 146: build meaning-context HV from recent meaningful tokens
+    def _grounded_meaning_hv(self, last_token, lookback=6):
+        """
+        Recall stored meaning across grounded_roles for the most recent
+        tokens in history. Walks back up to `lookback` tokens (newest first),
+        sums their role-recalls (with decay), and returns a renormalized HV.
+        Returns None if no token in the lookback window has any meaning data.
+        """
+        unified = self.org.unified
+        accum = None
+        hits = 0
+        # Build candidate list: last_token first, then walk back through history.
+        cands = [last_token]
+        for t in reversed(self.history[:-1] if self.history else []):
+            if t == last_token: continue
+            cands.append(t)
+            if len(cands) >= lookback:
+                break
+        decay = 1.0
+        for tok in cands:
+            tok_hit = False
+            for role in self.grounded_roles:
+                targets = unified._role_targets.get(role, set())
+                if tok not in targets:
+                    continue
+                try:
+                    hv = unified.recall(tok, role)
+                except Exception:
+                    continue
+                if hv is None:
+                    continue
+                contrib = (hv * decay).astype(np.complex64)
+                accum = contrib if accum is None else (accum + contrib)
+                hits += 1
+                tok_hit = True
+            decay *= 0.6   # exponential decay across lookback distance
+            if hits >= 4:    # stop once we have enough meaning signal
+                break
+        if hits == 0 or accum is None:
+            return None
+        return _renorm(accum)
+
+    #  one speak step: n-gram + thought + goal + grounded-meaning softmax
     def speak_step(self, last_token):
         ctx = self.history[-self.ngram_ctx:] if self.history else [last_token]
         unified = self.org.unified
@@ -144,6 +198,10 @@ class GenerationEngine:
             for v in self.org.unified._dirs:
                 goal = goal - np.vdot(v, goal) * v
             goal = _renorm(goal)
+        # Pack 146: optional grounded-meaning HV from last token's isa/property.
+        meaning = None
+        if self.grounded_gamma > 0.0:
+            meaning = self._grounded_meaning_hv(last_token)
         scores = []
         for w, base in cands:
             kw = self.org.unified.ck.key(w)
@@ -152,6 +210,9 @@ class GenerationEngine:
             if self.goal_gamma > 0.0 and goal is not None:
                 g_align = float(np.real(np.vdot(kw, goal))) / d
                 boost += self.goal_gamma * g_align
+            if self.grounded_gamma > 0.0 and meaning is not None:
+                m_align = float(np.real(np.vdot(kw, meaning))) / d
+                boost += self.grounded_gamma * m_align
             scores.append((w, max(float(base), 1e-6) * float(np.exp(boost))))
         vals = np.array([s for _, s in scores], dtype=np.float64)
         vals = vals / max(self.temperature, 1e-3)
