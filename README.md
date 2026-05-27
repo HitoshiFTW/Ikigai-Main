@@ -55,6 +55,7 @@ python experiments/day58_pack132_few_shot.py
 - **Real Wikipedia at 10K-article scale** -- 10,000 Simple English Wikipedia articles, 323K sentences, **3.35 million tokens** absorbed in one run. Substrate stays 192 MB FIXED. Trigram coverage 137,911 contexts, 4-gram 133,366. Real Wiki cooccur sims hold: north-south +0.57, king-queen +0.40, film-movie +0.39. Checkpoint 100 MB on disk. (`day59_pack141_wiki_10k.py`)
 - **FlatTrainer: bounded-RAM trainer for any data size** -- substrate stays 192 MB, side caches (ComputedKey vocab + SDM location cache) stay bounded too via periodic compaction at flush boundaries. Trained 3.35M tokens with peak RSS 3.6 GB on a 16 GB machine. (`ikigai/cognition/flat_trainer.py`)
 - **Developmental curriculum (5 stages)** -- organism learns English like a child: alphabet, letter->word anchors ("a for apple"), CVC words, Dolch sight words, simple SVO sentences. Each stage = bounded named effects on named channels. 26/26 letter->word anchors recovered at 97%+ confidence. Substrate stays 192 MB across all stages. (`day59_pack143_developmental_curriculum.py`)
+- **Curriculum priming yields 2.32x training speedup** -- A/B test: organism trained on curriculum (stages 1-5) before 500 Wikipedia articles trains the wiki phase in 336s vs 780s for the bare-wiki baseline. Same final corpus, same final vocab (~22K). Cache priming explains it: trigram + word caches are warm by the time wiki starts. Letter->anchor 26/26 also survives the 500-article wiki flood (no-forgetting at scale). (`day59_pack144_curriculum_then_wiki.py`)
 
 ## Status
 
