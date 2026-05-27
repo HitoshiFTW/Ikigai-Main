@@ -295,6 +295,30 @@ class IkigaiOrganism:
         for _ in range(n):
             self.unified.relate(word, 'sensory', anchor)
 
+    #  Pack 147: multi-channel meaning exposure
+    def expose_meaning(self, text, **kwargs):
+        """
+        Native multi-channel meaning capture. Writes:
+          - episode role (sentence-HV bound to each token)
+          - affordance role (subj/verb/obj triple if extractable)
+          - mod role (adjective+noun if extractable)
+        kwargs: pos_classifier OR subj_vocab/verb_vocab/obj_vocab/adj_vocab.
+        Returns per-channel write counts.
+        """
+        return self.unified.expose_meaning(text, **kwargs)
+
+    def expose_episode(self, text):
+        """Write a sentence as an episode bound to each of its tokens."""
+        return self.unified.expose_episode(text)
+
+    def expose_affordance(self, subj, verb, obj=None):
+        """Write a (subj does verb [does obj]) affordance fact."""
+        return self.unified.expose_affordance(subj, verb, obj)
+
+    def expose_modifier(self, modifier, noun):
+        """Write that modifier was seen describing noun."""
+        return self.unified.expose_modifier(modifier, noun)
+
     def _vision_encode(self, img, seed=127, bandwidth=2.0):
         """
         Encode arbitrary numeric array -> d-dim phasor HV. Modality-blind.

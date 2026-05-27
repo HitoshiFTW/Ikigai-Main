@@ -45,7 +45,8 @@ class MultiRoleMemory:
     """
 
     DEFAULT_ROLES = ('cooccur', 'next', 'next2', 'next3',
-                     'isa', 'sensory', 'property', 'verb', 'class')
+                     'isa', 'sensory', 'property', 'verb', 'class',
+                     'episode', 'affordance', 'mod')
 
     def __init__(self, d=512, M=16384, k=64, seed=114, window=3, remove_r=1,
                  svd_sample=2000, roles=DEFAULT_ROLES, M_rel=8192,
@@ -211,6 +212,107 @@ class MultiRoleMemory:
                 continue
             self._expose_ngram_role(tokens, n_ctx, role)
         return len(tokens) - 1
+
+    #  Pack 147: native multi-channel meaning exposure
+    def expose_episode(self, text):
+        """
+        Bind a sentence-HV (bundled token keys) to each content token under
+        the 'episode' role. Per-word recall later returns a "where have I
+        seen this used" gist. Written to the relational bank.
+        """
+        tokens = tokenize(text)
+        if len(tokens) < 2:
+            return 0
+        # sentence HV = renorm sum of token keys (order-free gist)
+        accum = np.zeros(self.d, dtype=np.complex64)
+        for t in tokens:
+            accum = accum + self.ck.key(t)
+        mags = np.abs(accum)
+        mags = np.where(mags > 1e-9, mags, 1.0)
+        shv = (accum / mags).astype(np.complex64)
+        # bind under episode role for each token
+        rolev = self.roles['episode']
+        bank = self._bank('episode')
+        written = 0
+        for t in set(tokens):
+            addr = self._bind(self.ck.key(t), rolev)
+            bank.write(addr, shv)
+            self._role_targets.setdefault('episode', set()).add(t)
+            self._seen.add(t)
+            written += 1
+        return written
+
+    def expose_affordance(self, subj, verb, obj=None):
+        """
+        Write a verb affordance: (subj does verb) and optionally (verb does
+        obj). Goes to the 'affordance' role in the relational bank. Simple
+        wrapper so callers don't have to know the role name.
+        """
+        n = 0
+        if subj and verb:
+            self.relate(subj, 'affordance', verb)
+            self._role_targets.setdefault('affordance', set()).add(subj)
+            n += 1
+        if verb and obj:
+            self.relate(verb, 'affordance', obj)
+            self._role_targets.setdefault('affordance', set()).add(verb)
+            n += 1
+        return n
+
+    def expose_modifier(self, modifier, noun):
+        """
+        Write that `modifier` was observed as a descriptor of `noun` under
+        the 'mod' role.
+        """
+        if not modifier or not noun:
+            return 0
+        self.relate(noun, 'mod', modifier)
+        self._role_targets.setdefault('mod', set()).add(noun)
+        return 1
+
+    def expose_meaning(self, text, pos_classifier=None,
+                       subj_vocab=None, verb_vocab=None,
+                       obj_vocab=None, adj_vocab=None):
+        """
+        Single-call meaning exposure: episode + affordance + modifier
+        in one pass.
+
+        If `pos_classifier` is a callable returning a POS-tag dict per
+        token, we use it for SVO + adjective extraction. Otherwise we
+        fall back to the explicit *_vocab sets (Pack 147 convention) or
+        skip the affordance / modifier writes if no info is available.
+
+        Returns dict of counts written per channel.
+        """
+        tokens = tokenize(text)
+        out = {'episode': 0, 'affordance': 0, 'modifier': 0}
+        out['episode'] = self.expose_episode(text)
+        # SVO + adj extraction
+        if pos_classifier is not None:
+            tags = pos_classifier(tokens)
+            nouns = [t for t in tokens if tags.get(t, '').startswith('N')]
+            verbs = [t for t in tokens if tags.get(t, '').startswith('V')]
+            adjs  = [t for t in tokens if tags.get(t, '').startswith('J')]
+            subj = nouns[0] if nouns else None
+            verb = verbs[0] if verbs else None
+            obj  = nouns[1] if len(nouns) > 1 else None
+        else:
+            # vocab-set fallback
+            subj_vocab = set(subj_vocab or [])
+            verb_vocab = set(verb_vocab or [])
+            obj_vocab  = set(obj_vocab  or [])
+            adj_vocab  = set(adj_vocab  or [])
+            subj = next((t for t in tokens if t in subj_vocab), None)
+            verb = next((t for t in tokens if t in verb_vocab), None)
+            obj  = next((t for t in tokens if t in obj_vocab),  None)
+            adjs = [t for t in tokens if t in adj_vocab]
+        out['affordance'] = self.expose_affordance(subj, verb, obj)
+        if adjs:
+            target = subj or obj
+            if target:
+                for a in adjs[:2]:
+                    out['modifier'] += self.expose_modifier(a, target)
+        return out
 
     def _expose_ngram_role(self, tokens, n_ctx, role):
         """Write each (ctx_n_ctx -> curr) under `role`. Aggregates per ctx."""
