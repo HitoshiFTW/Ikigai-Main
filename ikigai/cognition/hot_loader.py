@@ -36,7 +36,7 @@ class CognitionHotLoader:
         self._source  = {}  # name -> source string
         self._meta    = {}  # name -> {query, template, verified, n_tests_pass}
 
-    #  generate + hot-load
+    # ── generate + hot-load ───────────────────────────────────────────────
 
     def generate(self, name, query_text, test_cases=None):
         """
@@ -91,7 +91,7 @@ class CognitionHotLoader:
             self._modules[name] = fn
         return fn, ok
 
-    #  call
+    # ── call ──────────────────────────────────────────────────────────────
 
     def call(self, name, *args, **kwargs):
         """Call hot-loaded callable by name."""
@@ -100,7 +100,7 @@ class CognitionHotLoader:
             raise KeyError(f'hot_loader: no module {name!r}')
         return fn(*args, **kwargs)
 
-    #  introspection
+    # ── introspection ─────────────────────────────────────────────────────
 
     def has(self, name):
         return name in self._modules
@@ -118,7 +118,7 @@ class CognitionHotLoader:
     def n_modules(self):
         return len(self._modules)
 
-    #  internal
+    # ── internal ──────────────────────────────────────────────────────────
 
     def _exec_source(self, name, source):
         """exec() source, find callable named `name`. Returns (fn, ok)."""

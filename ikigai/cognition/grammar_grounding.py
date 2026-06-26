@@ -73,7 +73,7 @@ class GrammarGrounding:
         self._bigram     = Counter()
         self._word_count = Counter()
 
-    #  exposure
+    # ── exposure ──────────────────────────────────────────────────────────
 
     def expose(self, text, lexicon):
         """
@@ -124,7 +124,7 @@ class GrammarGrounding:
             )
             n_dict[word] += 1
 
-    #  similarity in grammatical role
+    # ── similarity in grammatical role ────────────────────────────────────
 
     def pos_similarity(self, w1, w2, weight=(0.5, 0.5)):
         """
@@ -157,7 +157,7 @@ class GrammarGrounding:
         scores.sort(key=lambda x: -x[1])
         return scores[:k]
 
-    #  bigram statistics
+    # ── bigram statistics ─────────────────────────────────────────────────
 
     def bigram_count(self, prev, curr):
         return self._bigram.get((prev, curr), 0)
@@ -179,7 +179,7 @@ class GrammarGrounding:
         """High-surprise boundary = likely end of phrase / start of new constituent."""
         return self.surprise(prev, curr) >= threshold
 
-    #  introspection
+    # ── introspection ─────────────────────────────────────────────────────
 
     @property
     def vocab_size(self):

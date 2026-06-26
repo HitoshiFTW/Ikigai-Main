@@ -4,12 +4,12 @@ ikigai.cognition.schema_inducer -- Typed Schema Induction via Anti-Unification.
 Day 55 Pack 47 -- Layer 2 Composition completion. Day 60 benchmark enabler.
 
 Problem: system can recall skills but cannot generalize to new instances.
-         SkillCrystal stores (intent, procedure) as HVs -- retrieval only.
+         SkillCrystal stores (intent, procedure) as HVs — retrieval only.
          No way to generate novel instances of a learned pattern.
 
 Fix: SchemaInducer applies Plotkin (1970) Least General Generalization.
-     N examples -> schema with SLOT markers at variable positions.
-     apply(schema, *args) fills slots -> new instance generated.
+     N examples → schema with SLOT markers at variable positions.
+     apply(schema, *args) fills slots → new instance generated.
 
 Algorithm:
      schema = examples[0]
@@ -24,9 +24,9 @@ No forgetting: observe() is append-only. Support count monotone.
                (more examples with consensus = more fixed positions).
 
 Day 60 benchmark:
-     5 examples of 'list_filter' -> schema = ['result', 'for', 'x', 'in', SLOT, 'if', SLOT]
-     apply('my_list', 'my_pred') -> ['result', 'for', 'x', 'in', 'my_list', 'if', 'my_pred']
-     20 patterns * 5 examples -> 20 schemas, all generalize correctly.
+     5 examples of 'list_filter' → schema = ['result', 'for', 'x', 'in', SLOT, 'if', SLOT]
+     apply('my_list', 'my_pred') → ['result', 'for', 'x', 'in', 'my_list', 'if', 'my_pred']
+     20 patterns × 5 examples → 20 schemas, all generalize correctly.
      Never forgets schema 1 after learning schema 20.
 """
 
@@ -92,7 +92,7 @@ class SchemaInducer:
         self._examples = {}   # name -> [token_list, ...]
         self._schemas  = {}   # name -> entry dict
 
-    #  observation
+    # ── observation ───────────────────────────────────────────────────────
 
     def observe(self, name, output_tokens):
         """Append one output example for pattern 'name'."""
@@ -110,7 +110,7 @@ class SchemaInducer:
             self.observe(name, ex)
         return len(self._examples[name])
 
-    #  induction
+    # ── induction ─────────────────────────────────────────────────────────
 
     def induce(self, name, min_examples=2):
         """
@@ -149,7 +149,7 @@ class SchemaInducer:
             if len(self._examples[name]) >= min_examples
         }
 
-    #  application
+    # ── application ───────────────────────────────────────────────────────
 
     def apply(self, name, *args):
         """
@@ -161,7 +161,7 @@ class SchemaInducer:
             return []
         return apply_schema(schema, list(args))
 
-    #  schema comparison
+    # ── schema comparison ──────────────────────────────────────────────────
 
     def schemas_agree(self, name_a, name_b):
         """True if two schemas have identical fixed token positions."""
@@ -174,7 +174,7 @@ class SchemaInducer:
                 return False
         return True
 
-    #  stats
+    # ── stats ──────────────────────────────────────────────────────────────
 
     def schema_info(self, name):
         self.induce(name)

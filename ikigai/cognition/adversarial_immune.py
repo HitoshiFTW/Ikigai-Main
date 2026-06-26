@@ -119,7 +119,7 @@ class AdversarialImmune:
         self._log        = []      # list of (tick, query_tokens, hits)
         self._tick       = 0
 
-    #  registration
+    # ── registration ──────────────────────────────────────────────────────
 
     def register_threat(self, name, tokens):
         """Encode a known jailbreak / injection template as antibody."""
@@ -132,7 +132,7 @@ class AdversarialImmune:
         """Remove antibody (test/admin only)."""
         return self._antibodies.pop(threat_name, None) is not None
 
-    #  scanning
+    # ── scanning ──────────────────────────────────────────────────────────
 
     def scan(self, query_tokens, threshold=0.4):
         """
@@ -155,7 +155,7 @@ class AdversarialImmune:
     def is_safe(self, query_tokens, threshold=0.4):
         return len(self.scan(query_tokens, threshold)) == 0
 
-    #  response
+    # ── response ──────────────────────────────────────────────────────────
 
     def quarantine(self, query_tokens, reason='auto'):
         """
@@ -184,7 +184,7 @@ class AdversarialImmune:
         ab.last_seen  = self._tick
         return True
 
-    #  introspection
+    # ── introspection ─────────────────────────────────────────────────────
 
     @property
     def n_threats(self):

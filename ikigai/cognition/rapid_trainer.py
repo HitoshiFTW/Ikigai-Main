@@ -81,7 +81,7 @@ class RapidTrainer:
         self.n_sentences = 0
         self.n_tokens = 0
 
-    #  public
+    # ── public ─────────────────────────────────────────────────────────────
     def add(self, text):
         toks = _tokenize(text)
         if self.stop:
@@ -110,7 +110,7 @@ class RapidTrainer:
         self._batch = []
         self.mr._dirty = True
 
-    #  cooccur batched flush
+    # ── cooccur batched flush ──────────────────────────────────────────────
     def _flush_cooccur(self, batch):
         d = self.mr.d
         w = self.cooccur_w
@@ -157,7 +157,7 @@ class RapidTrainer:
         for t, idx in zip(order, locs):
             self.mr.sdm.C[idx] += agg[t].astype(np.complex64)
 
-    #  n-gram batched flush
+    # ── n-gram batched flush ───────────────────────────────────────────────
     def _flush_ngram(self, batch, n_ctx, role):
         mr = self.mr
         rolev = mr.roles[role]

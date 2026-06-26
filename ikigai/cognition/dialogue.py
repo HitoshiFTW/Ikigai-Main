@@ -89,7 +89,7 @@ class DialogueLoop:
         self._active_persona = None
         self._next_idx       = 0
 
-    #  conversation lifecycle
+    # ── conversation lifecycle ────────────────────────────────────────────
 
     def start(self, persona_name=None):
         """Begin a fresh conversation. Optionally activate a persona basin."""
@@ -114,7 +114,7 @@ class DialogueLoop:
             return True
         return False
 
-    #  turn helpers
+    # ── turn helpers ──────────────────────────────────────────────────────
 
     def _encode_text(self, text):
         """Get a phasor HV for the turn from being's encoder (CGPSP byte-trajectory)."""
@@ -159,7 +159,7 @@ class DialogueLoop:
             )
         return turn
 
-    #  primary interface
+    # ── primary interface ────────────────────────────────────────────────
 
     def user_says(self, text):
         """Process a user turn: read into organism + bind w/ USER role."""
@@ -176,7 +176,7 @@ class DialogueLoop:
         hv = self._make_turn_hv(text, self._role_agent)
         return self._add_turn('agent', text, hv)
 
-    #  retrieval
+    # ── retrieval ─────────────────────────────────────────────────────────
 
     def context_hv(self):
         return self._context_hv if self._context_hv is not None \
@@ -201,7 +201,7 @@ class DialogueLoop:
         results.sort(key=lambda x: -x[1])
         return results[:top_k]
 
-    #  persona inspection
+    # ── persona inspection ────────────────────────────────────────────────
 
     def active_persona(self):
         return self._active_persona
@@ -220,7 +220,7 @@ class DialogueLoop:
             scores[name] = sim
         return scores
 
-    #  introspection
+    # ── introspection ─────────────────────────────────────────────────────
 
     @property
     def n_turns(self):

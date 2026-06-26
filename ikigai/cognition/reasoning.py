@@ -1,13 +1,13 @@
 """
-ikigai.cognition.reasoning -- Pure VSA reasoning primitives.
+ikigai.cognition.reasoning — Pure VSA reasoning primitives.
 
 Houses (Day 54 Packs 13-17):
-    RelationAlgebra       -- analogical reasoning + relation composition/inversion
+    RelationAlgebra       — analogical reasoning + relation composition/inversion
                             (Packs 14, 15). Used for A:B::C:? and R1 (X) R2.
-    SemanticRoleMemory    -- agent/action/patient role-filler binding (Pack 16).
-    EventSequenceMemory   -- N events compressed into one positional-bound HV
+    SemanticRoleMemory    — agent/action/patient role-filler binding (Pack 16).
+    EventSequenceMemory   — N events compressed into one positional-bound HV
                             (Pack 17).
-    PatternComposer       -- algebraic pattern detection + composition + code gen
+    PatternComposer       — algebraic pattern detection + composition + code gen
                             (Pack 13). detect/compose/synthesize functions.
 
 All classes operate on bipolar (+-1) HVs and use majority bundling.
@@ -22,7 +22,7 @@ import numpy as np
 HV_DIM = 400
 
 
-#  Shared HV primitives
+# ── Shared HV primitives ──────────────────────────────────────────────────────
 
 def make_bipolar_hv(seed_str, dim=HV_DIM):
     rng = random.Random(hash(seed_str) & 0x7FFFFFFF)
@@ -49,7 +49,7 @@ def cosine_sim(a, b):
     return float(np.dot(a, b) / (na * nb))
 
 
-#  RelationAlgebra (Packs 14, 15)
+# ── RelationAlgebra (Packs 14, 15) ────────────────────────────────────────────
 
 class RelationAlgebra:
     """
@@ -128,7 +128,7 @@ class RelationAlgebra:
         return hamming_sim(self.relation_hvs[r1], self.relation_hvs[r2])
 
 
-#  SemanticRoleMemory (Pack 16)
+# ── SemanticRoleMemory (Pack 16) ──────────────────────────────────────────────
 
 class SemanticRoleMemory:
     """
@@ -193,7 +193,7 @@ class SemanticRoleMemory:
         return best, best_sim
 
 
-#  EventSequenceMemory (Pack 17)
+# ── EventSequenceMemory (Pack 17) ─────────────────────────────────────────────
 
 class EventSequenceMemory:
     """
@@ -281,7 +281,7 @@ class EventSequenceMemory:
         return best, best_s
 
 
-#  PatternComposer (Pack 13)
+# ── PatternComposer (Pack 13) ─────────────────────────────────────────────────
 
 def detect_pattern(examples):
     """

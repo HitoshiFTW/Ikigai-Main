@@ -1,7 +1,7 @@
 """
 ikigai.cognition.metacognitive_mirror -- Metacognitive HV Mirror.
 
-Day 55 Pack 50 -- *6 Decisive stack: self-model via HV binding.
+Day 55 Pack 50 -- ★6 Decisive stack: self-model via HV binding.
 
 Problem: system has no model of its own belief state across turns.
          No way to detect when own output diverges from belief.
@@ -86,7 +86,7 @@ class MetacognitiveHVMirror:
         self._drift_log       = []   # float drift per turn
         self._turn            = 0
 
-    #  per-turn update
+    # ── per-turn update ───────────────────────────────────────────────────
 
     def update(self, B_U, emit_tokens):
         """
@@ -110,7 +110,7 @@ class MetacognitiveHVMirror:
         self._turn += 1
         return self_hv, float(drift)
 
-    #  recovery
+    # ── recovery ──────────────────────────────────────────────────────────
 
     def recover_emit(self, B_U, self_hv):
         """
@@ -120,7 +120,7 @@ class MetacognitiveHVMirror:
         B_bipolar = _to_bipolar(np.asarray(B_U, dtype=np.float32))
         return _bind(B_bipolar, self_hv)
 
-    #  drift queries
+    # ── drift queries ─────────────────────────────────────────────────────
 
     def drift(self):
         """Last turn drift. 0.0 if no turns yet."""
@@ -144,7 +144,7 @@ class MetacognitiveHVMirror:
         y = np.array(self._drift_log, dtype=np.float32)
         return float(np.polyfit(x, y, 1)[0])
 
-    #  stats
+    # ── stats ─────────────────────────────────────────────────────────────
 
     @property
     def n_turns(self):

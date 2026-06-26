@@ -3,10 +3,10 @@ ikigai.cognition.pgmw -- Persona Grid Metric Warp.
 
 Day 56 Pack 86 -- Pillar 3 of UHE.
 
-Same memory matrix M. Different lens p (persona) -> different retrieval.
+Same memory matrix M. Different lens p (persona) → different retrieval.
 
 Mathematical core:
-    persona p  in  C^d (unit norm)
+    persona p ∈ ℂ^d (unit norm)
     warped metric: M(p) = I + lambda * (p p^H - I/d)
     warped inner product: <x, y>_p = x^H M(p) y
                                    = x^H y + lambda * (<x,p><p,y> - <x,y>/d)
@@ -32,7 +32,7 @@ def _cdot(a, b):
 
 
 def _normalize(v):
-    # Component-wise unit phasor normalization -- matches lexicon HV convention.
+    # Component-wise unit phasor normalization — matches lexicon HV convention.
     # Each component gets magnitude 1 (not whole-vector L2=1).
     mags = np.abs(v)
     mags = np.where(mags > 1e-9, mags, 1.0)
@@ -60,7 +60,7 @@ class PersonaGrid:
         self._personas = {}  # name -> (vector, lam)
         self._active   = []  # list of names
 
-    #  persona definition
+    # ── persona definition ────────────────────────────────────────────────
 
     def add_persona(self, name, vector, lam=0.5):
         v = np.asarray(vector)
@@ -84,7 +84,7 @@ class PersonaGrid:
         if name in self._active:
             self._active.remove(name)
 
-    #  activation
+    # ── activation ────────────────────────────────────────────────────────
 
     def set_active(self, *names):
         for n in names:
@@ -100,7 +100,7 @@ class PersonaGrid:
     def active(self):
         return list(self._active)
 
-    #  warped inner product
+    # ── warped inner product ──────────────────────────────────────────────
 
     def warped_inner(self, x, y):
         """
@@ -131,7 +131,7 @@ class PersonaGrid:
             return 0.0
         return sxy / np.sqrt(sxx * syy)
 
-    #  retrieval
+    # ── retrieval ─────────────────────────────────────────────────────────
 
     def retrieve(self, query, memory_items, top_k=5):
         """
@@ -145,7 +145,7 @@ class PersonaGrid:
         results.sort(key=lambda x: -x[1])
         return results[:top_k]
 
-    #  introspection
+    # ── introspection ─────────────────────────────────────────────────────
 
     @property
     def n_personas(self):

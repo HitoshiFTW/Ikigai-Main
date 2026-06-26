@@ -7,7 +7,7 @@ Problem: current system responds turn-by-turn with no planning.
          Complex tasks (5000-line codegen, 20-step reasoning) need
          hierarchical task decomposition before execution.
 
-Fix: GoalDecomposer maintains a plan corpus (goal_hv -> plan steps).
+Fix: GoalDecomposer maintains a plan corpus (goal_hv → plan steps).
      decompose(goal_tokens) = nearest-plan retrieval + step binding.
      Leaves are atomic actions: recall, codegen, math, kb_query, verify, respond.
 
@@ -105,7 +105,7 @@ class PlanStep:
 
 class GoalDecomposer:
     """
-    Hierarchical goal -> plan decomposition via HV nearest-plan retrieval.
+    Hierarchical goal → plan decomposition via HV nearest-plan retrieval.
 
     register_plan(name, intent_tokens, steps)  -- add plan template
     decompose(goal_tokens, depth=1)            -- retrieve + instantiate plan
@@ -119,12 +119,12 @@ class GoalDecomposer:
 
     def __init__(self, d=400):
         self.d      = d
-        self._plans = {}   # name -> {intent_hv, steps, count}
+        self._plans = {}   # name → {intent_hv, steps, count}
 
         for p in BUILTIN_PLANS:
             self.register_plan(p['name'], p['intent'], p['steps'])
 
-    #  registration
+    # ── registration ──────────────────────────────────────────────────────
 
     def register_plan(self, name, intent_tokens, steps):
         """
@@ -152,7 +152,7 @@ class GoalDecomposer:
                 'count':         1,
             }
 
-    #  decomposition
+    # ── decomposition ─────────────────────────────────────────────────────
 
     def nearest_plan(self, goal_tokens):
         """Return (plan_name, score) of best matching plan."""
@@ -207,7 +207,7 @@ class GoalDecomposer:
             return scored[:top_k]
         return list(self._plans.keys())[:top_k]
 
-    #  stats
+    # ── stats ─────────────────────────────────────────────────────────────
 
     @property
     def plan_count(self):

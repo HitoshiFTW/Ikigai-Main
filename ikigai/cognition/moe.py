@@ -1,5 +1,5 @@
 """
-ikigai.cognition.moe -- Mixture-of-Experts at the HV level (Day 54 Pack 22)
+ikigai.cognition.moe — Mixture-of-Experts at the HV level (Day 54 Pack 22)
 
 Multiple specialized codebooks indexed by domain centroid HVs.
 Query -> centroid sim -> activate single best codebook -> retrieve.
@@ -9,8 +9,8 @@ Disk-backed codebooks (via numpy.memmap, when added) allow 100M+ templates
 while working set stays at single-codebook size.
 
 Public API:
-    Codebook(name, items_dict)        -- lazy-loaded HV-indexed item bag
-    MoERouter()                       -- registers experts, routes queries
+    Codebook(name, items_dict)        — lazy-loaded HV-indexed item bag
+    MoERouter()                       — registers experts, routes queries
         register_expert(name, centroid_keywords, codebook_items)
         route(text)              -> (expert_name, sim)
         query(text, top_k)       -> (expert_name, [(item, sim), ...])

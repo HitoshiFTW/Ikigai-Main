@@ -1,7 +1,7 @@
 # ===========================================================================
-# TOOL ROUTER  (Day 32 Pack 4 -- Controlled Modular Extraction)
+# TOOL ROUTER  (Day 32 Pack 4 — Controlled Modular Extraction)
 # Extracted from ikigai.py lines 4424-4565.
-# Only dependency: collections.deque -- zero coupling to runtime state.
+# Only dependency: collections.deque — zero coupling to runtime state.
 # ===========================================================================
 
 from collections import deque
@@ -35,7 +35,7 @@ class ToolRouter:
     operation_type   : str
     task_origin      : str
     route_confidence : float [0, 1]
-    route_summary    : str         -- always exactly 2 sentences
+    route_summary    : str         — always exactly 2 sentences
     """
 
     def __init__(self, maxlen=128):

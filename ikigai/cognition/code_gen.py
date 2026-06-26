@@ -1,11 +1,11 @@
 """
-ikigai.cognition.code_gen -- Code retrieval + AST grammar generation.
+ikigai.cognition.code_gen — Code retrieval + AST grammar generation.
 
 Houses (Day 54 Packs 18, 20):
-    CodeIndex          -- bipolar HV index over function corpus + NL queries.
+    CodeIndex          — bipolar HV index over function corpus + NL queries.
                          AST atoms (node types, identifiers, semantic tags)
                          bundled per function (Pack 18, +bipolar variant).
-    ASTGrammarWalker   -- generate Python code from NL via typed-slot AST
+    ASTGrammarWalker   — generate Python code from NL via typed-slot AST
                          templates. 100% compile rate by construction
                          (Pack 20). Verifier loop integration optional.
 
@@ -48,7 +48,7 @@ def cosine(a, b):
     return float(np.dot(a, b) / (na * nb))
 
 
-#  CodeIndex (Pack 18)
+# ── CodeIndex (Pack 18) ───────────────────────────────────────────────────────
 
 _ALIASES = {
     'lst': 'list', 'arr': 'array', 'str': 'string', 'num': 'number',
@@ -178,7 +178,7 @@ def rename_function(code, old_name, new_name):
     return code
 
 
-#  Common code corpus (Pack 27)
+# ── Common code corpus (Pack 27) ─────────────────────────────────────────────
 
 _COMMON_CORPUS = [
     # Math
@@ -414,16 +414,16 @@ _COMMON_CORPUS = [
     ('flatten_list', 'flatten list of nested lists',
      'def flatten(lst):\n    result = []\n    for item in lst:\n        if isinstance(item, list): result.extend(flatten(item))\n        else: result.append(item)\n    return result'),
 
-    #  Pack 29 additions -- targeting remaining HumanEval failures
+    # ── Pack 29 additions — targeting remaining HumanEval failures ──────────────
 
     # FIXED: decode_cyclic / encode_cyclic (direction was swapped in original)
-    # HumanEval/38: encode shifts abc->bca (group[1:]+group[0]), decode reverses
+    # HumanEval/38: encode shifts abc→bca (group[1:]+group[0]), decode reverses
     ('encode_cyclic_correct', 'encode string by cycling groups of three characters left',
      'def encode_cyclic(s):\n    result = ""\n    for i in range(0, len(s), 3):\n        g = s[i:i+3]\n        result += (g[1:] + g[0]) if len(g) == 3 else g\n    return result'),
     ('decode_cyclic_correct', 'decode string encoded by cycling groups of three left shift',
      'def decode_cyclic(s):\n    result = ""\n    for i in range(0, len(s), 3):\n        g = s[i:i+3]\n        result += (g[-1] + g[:-1]) if len(g) == 3 else g\n    return result'),
 
-    # FIXED: check_dict_case -- handle non-alpha keys (e.g. "56")
+    # FIXED: check_dict_case — handle non-alpha keys (e.g. "56")
     ('check_dict_case_fixed', 'check if all dictionary string keys are all lowercase or all uppercase',
      'def check_dict_case(dict):\n    if not dict: return False\n    state = "start"\n    for key in dict:\n        if not isinstance(key, str): return False\n        if state == "start":\n            if key.isupper(): state = "upper"\n            elif key.islower(): state = "lower"\n            else: return False\n        elif state == "upper" and not key.isupper(): return False\n        elif state == "lower" and not key.islower(): return False\n    return state in ("upper", "lower")'),
 
@@ -431,31 +431,31 @@ _COMMON_CORPUS = [
     ('triangle_area_base_height', 'calculate area of triangle with given base and height half base times height',
      'def triangle_area(a, h): return 0.5 * a * h'),
 
-    # FIXED: hex_key -- explicit correct prime set
+    # FIXED: hex_key — explicit correct prime set
     ('hex_key_fixed', 'count hexadecimal prime digit characters 2 3 5 7 B D in string',
      'def hex_key(num):\n    prime_hex = {"2","3","5","7","B","D"}\n    return sum(1 for c in num.upper() if c in prime_hex)'),
 
-    # FIXED: count_up_to -- enriched docstring to beat vowels_count
+    # FIXED: count_up_to — enriched docstring to beat vowels_count
     ('count_up_to_primes', 'count_up_to return list of prime numbers less than n primes ascending',
      'def count_up_to(n):\n    def is_prime(p):\n        if p < 2: return False\n        return all(p % i != 0 for i in range(2, int(p**0.5)+1))\n    return [i for i in range(2, n) if is_prime(i)]'),
 
-    # FIXED: f sequence -- enriched docstring to beat sum_product
+    # FIXED: f sequence — enriched docstring to beat sum_product
     ('f_factorial_sum_seq', 'f sequence factorial of i if i even else sum from 1 to i',
      'def f(n):\n    result = []\n    for i in range(1, n+1):\n        if i % 2 == 0:\n            p = 1\n            for j in range(1, i+1): p *= j\n            result.append(p)\n        else:\n            result.append(i*(i+1)//2)\n    return result'),
 
-    # FIXED: do_algebra -- enriched docstring to beat flatten_list
+    # FIXED: do_algebra — enriched docstring to beat flatten_list
     ('do_algebra_operators', 'do_algebra apply operators to operands list arithmetic plus minus multiply divide power',
      'def do_algebra(operator, operand):\n    result = operand[0]\n    for op, n in zip(operator, operand[1:]):\n        if op == "+": result += n\n        elif op == "-": result -= n\n        elif op == "*": result *= n\n        elif op == "//": result //= n\n        elif op == "**": result **= n\n    return result'),
 
-    # FIXED: find_max -- HumanEval/158 wants max unique chars, then lex order
+    # FIXED: find_max — HumanEval/158 wants max unique chars, then lex order
     ('find_max_unique', 'find_max word with maximum unique characters break ties alphabetically',
      'def find_max(words): return max(sorted(words), key=lambda w: len(set(w)))'),
 
-    # FIXED: solve string -- HumanEval/161 swap case or digit sum
+    # FIXED: solve string — HumanEval/161 swap case or digit sum
     ('solve_str_fixed', 'solve string sum digits if all digits else swap case of letters',
      'def solve(s):\n    if all(c.isdigit() for c in s): return str(sum(int(c) for c in s))\n    return "".join(chr(ord(c)^32) if c.isalpha() else c for c in s)'),
 
-    # FIXED: iscube -- correct rounding for perfect cube check
+    # FIXED: iscube — correct rounding for perfect cube check
     ('iscube_fixed', 'iscube check if integer is perfect cube of some integer',
      'def iscube(a):\n    a = abs(a)\n    r = round(a ** (1/3))\n    return r**3 == a or (r+1)**3 == a or (r-1)**3 == a'),
 
@@ -689,7 +689,7 @@ def generate_with_index(query_text, fn_name, index, threshold=0.0, fallback=True
     return candidates
 
 
-#  ASTGrammarWalker (Pack 20)
+# ── ASTGrammarWalker (Pack 20) ────────────────────────────────────────────────
 
 TEMPLATES = {
     'expr_single': {

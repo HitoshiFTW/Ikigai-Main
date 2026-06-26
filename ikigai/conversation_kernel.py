@@ -96,7 +96,7 @@ class ConversationKernel:
 
         self._turn = 0
 
-    #  master step
+    # ─── master step ─────────────────────────────────────────────
 
     def step(self, tokens, role='user'):
         """
@@ -143,7 +143,7 @@ class ConversationKernel:
             turn=self._turn,
         )
 
-    #  recall
+    # ─── recall ──────────────────────────────────────────────────
 
     def recall(self, k_back, role='user'):
         """Retrieve turn HV from k_back turns ago via PLHB reverse rotation."""
@@ -152,7 +152,7 @@ class ConversationKernel:
     def recall_fidelity(self, k_back, role='user'):
         return self.plhb.recall_fidelity(k_back, role)
 
-    #  mining
+    # ─── mining ──────────────────────────────────────────────────
 
     def mine_schemas(self, min_support=2):
         """Anti-unification schema mining over crystallized triples."""
@@ -164,7 +164,7 @@ class ConversationKernel:
     def load_wal(self, path):
         self.acci.load_wal(path)
 
-    #  state summary
+    # ─── state summary ───────────────────────────────────────────
 
     def state_summary(self):
         return {

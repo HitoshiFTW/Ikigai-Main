@@ -86,7 +86,7 @@ class BenchmarkRunner:
         self._results = {}    # name -> {pipeline_ok, baseline_ok, ...}
         self._trained = []    # ordered list of pattern names trained
 
-    #  training
+    # ── training ──────────────────────────────────────────────────────────
 
     def train(self, patterns):
         """
@@ -99,7 +99,7 @@ class BenchmarkRunner:
             if name not in self._trained:
                 self._trained.append(name)
 
-    #  evaluation
+    # ── evaluation ────────────────────────────────────────────────────────
 
     def test_recall(self, patterns, slot_args=None):
         """
@@ -128,7 +128,7 @@ class BenchmarkRunner:
         self._results = results
         return results
 
-    #  metrics
+    # ── metrics ───────────────────────────────────────────────────────────
 
     def pipeline_recall(self):
         if not self._results:
@@ -163,7 +163,7 @@ class BenchmarkRunner:
             if not r['pipeline_ok'] and not r['baseline_ok']
         ]
 
-    #  report
+    # ── report ────────────────────────────────────────────────────────────
 
     def report(self):
         n = len(self._results)

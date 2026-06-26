@@ -130,7 +130,7 @@ class SensoryGrounding:
     def anchor_names(self):
         return list(self._anchors.keys())
 
-    #  exposure: drift lexicon words toward anchors
+    # ── exposure: drift lexicon words toward anchors ────────────────────────
 
     def expose(self, text, lexicon, drift_rate=0.15, context_drift=0.04, window=3):
         """
@@ -173,7 +173,7 @@ class SensoryGrounding:
                 strength = context_drift / distance
                 lexicon[neighbor] = _renorm(lexicon[neighbor] + strength * anchor_hv)
 
-    #  inspection
+    # ── inspection ───────────────────────────────────────────────────────────
 
     def nearest_anchor(self, word_hv):
         """Which anchor best aligns with this word HV?"""

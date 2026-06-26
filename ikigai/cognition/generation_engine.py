@@ -44,6 +44,22 @@ def _tokenize(text):
     return [t for t in re.sub(r"[^a-z0-9'\s]", ' ', text.lower()).split() if t]
 
 
+def _is_junk_token(tok):
+    """Pack 192 v1.1 -- reject code-y / non-linguistic candidates.
+    Heuristics (no English vocab): digit, length>14, low alpha ratio,
+    mid-word uppercase (camel/PascalCase)."""
+    if not tok or len(tok) > 14:
+        return True
+    if any(ch.isdigit() for ch in tok):
+        return True
+    n_alpha = sum(1 for ch in tok if ch.isalpha())
+    if n_alpha == 0 or n_alpha / len(tok) < 0.7:
+        return True
+    if any(c.isupper() for c in tok[1:]):
+        return True
+    return False
+
+
 def _renorm(hv):
     mags = np.abs(hv)
     mags = np.where(mags > 1e-9, mags, 1.0)
@@ -108,21 +124,28 @@ class GenerationEngine:
         self.history = []
         self._rng = random.Random()
 
-    #  initialization
+    # ── initialization ────────────────────────────────────────────────────
     def _init_thought(self, prompt_tokens):
         d = self.org.unified.d
         if not prompt_tokens:
             self.thought = np.ones(d, dtype=np.complex64) / np.sqrt(d)
             self.goal = self.thought.copy()
             return
+        # Pack 149: if the organism has SelfDefiningConcepts built, prefer
+        # concept[t] over raw key(t) for prompt-HV construction. The
+        # concept HV fuses every channel's meaning for the word, so the
+        # goal anchor is pulled toward semantic meaning instead of raw symbol.
+        # Falls back per-token to key(t) when no concept exists.
+        cs = getattr(self.org, '_concepts', None)
         accum = np.zeros(d, dtype=np.complex64)
         for t in prompt_tokens:
-            accum = accum + self.org.unified.ck.key(t)
+            c = cs.concept_of(t) if cs is not None else None
+            accum = accum + (c if c is not None else self.org.unified.ck.key(t))
         self.thought = _renorm(accum)
         # Pack 142: goal is the FIXED initial prompt HV; never drifts.
         self.goal = self.thought.copy()
 
-    #  one think step: thought-state walks the substrate
+    # ── one think step: thought-state walks the substrate ─────────────────
     def think_step(self):
         ROLE = self.org.unified.roles['cooccur']
         addr = (self.thought * ROLE).astype(np.complex64)
@@ -131,7 +154,7 @@ class GenerationEngine:
             self.momentum * self.thought + (1.0 - self.momentum) * resp)
         self.thought_trace.append(self.thought.copy())
 
-    #  Pack 146: build meaning-context HV from recent meaningful tokens
+    # ── Pack 146: build meaning-context HV from recent meaningful tokens ──
     def _grounded_meaning_hv(self, last_token, lookback=6):
         """
         Recall stored meaning across grounded_roles for the most recent
@@ -173,7 +196,7 @@ class GenerationEngine:
             return None
         return _renorm(accum)
 
-    #  one speak step: n-gram + thought + goal + grounded-meaning softmax
+    # ── one speak step: n-gram + thought + goal + grounded-meaning softmax ─
     def speak_step(self, last_token):
         ctx = self.history[-self.ngram_ctx:] if self.history else [last_token]
         unified = self.org.unified
@@ -182,6 +205,53 @@ class GenerationEngine:
                 ctx, top_k=self.top_k, weights=self.ngram_weights)
         else:
             cands = unified.next_word_candidates(last_token, top_k=self.top_k)
+        # Pack 192 v1.1 junk filter: drop code-y candidates (digits, camelCase,
+        # long-non-alpha). The substrate may hold poisoned tokens from prior
+        # absorbs; this filters them at READ time without touching writes.
+        cands = [(w, s) for w, s in cands if not _is_junk_token(w)]
+        # Pack 192 v1.2 vocab gate: candidate must be in absorbed cooccur
+        # vocab. Plus the alpha-only ASCII filter on the candidate itself.
+        seen_vocab = getattr(unified, '_cooccur_seen', None)
+        if seen_vocab:
+            cands = [(w, s) for w, s in cands
+                      if w in seen_vocab
+                      and len(w) >= 2 and len(w) <= 14
+                      and all(ord(ch) < 128 and ch.isalpha() for ch in w)]
+        # Pack 198: frame-scoped vocab gate. If a frame is active for this
+        # generation, candidates must be in THAT frame's vocab. Keeps English
+        # generation in English, Italian in Italian, etc.
+        fidx = getattr(self, '_active_frame_idx', None)
+        if fidx is not None and hasattr(self.org, 'frames'):
+            fv = self.org.frames.frame_vocab[fidx] if 0 <= fidx < self.org.frames.K else None
+            if fv:
+                strict = [(w, s) for w, s in cands if w in fv]
+                if strict:
+                    cands = strict
+        # Pack 199 NEW1: grammar-FSM filter. Look up prev-token's frame, get
+        # next-frame distribution, drop candidates whose frame has near-zero
+        # transition prob from prev's frame. Soft filter (preserves diversity
+        # via dist mass, not hard cut).
+        ff = getattr(self.org, 'frames', None)
+        if ff is not None and ff.locked and ff.frame_bigram.sum() > 0:
+            pf = ff.frame_of_word(last_token)
+            if pf >= 0:
+                next_dist = ff.next_frame_probs(pf)
+                if next_dist is not None and next_dist.max() > 0:
+                    boosted = []
+                    for w, s in cands:
+                        cf = ff.frame_of_word(w)
+                        if cf >= 0:
+                            boost = float(next_dist[cf])
+                        else:
+                            boost = 1.0 / max(ff.K, 1)
+                        boosted.append((w, s * (0.1 + boost)))
+                    cands = boosted
+        # Pack 199 P2: stop-loop detection. If last 2 emitted tokens are the
+        # same as a candidate, suppress that candidate to break repetition.
+        if len(self.history) >= 2:
+            recent = self.history[-2:]
+            if recent[0] == recent[1]:
+                cands = [(w, s * 0.05) if w == recent[-1] else (w, s) for w, s in cands]
         if not cands:
             return None
         d = self.org.unified.d
@@ -222,28 +292,61 @@ class GenerationEngine:
         idx = self._rng.choices(range(len(scores)), weights=probs)[0]
         return scores[idx][0]
 
-    #  primary interface
-    def generate(self, prompt='', max_tokens=100, return_trace=False, seed=None):
+    # ── primary interface ──────────────────────────────────────────────────
+    def generate(self, prompt='', max_tokens=100, return_trace=False, seed=None,
+                  auto_frame=True):
+        """Generate text from prompt. Pack 198: if `auto_frame` and the
+        organism has frames, the prompt is routed to a frame, that frame is
+        activated for the duration of generation, and candidates are
+        constrained to the frame's vocab."""
         if seed is not None:
             self._rng.seed(seed)
         tokens = _tokenize(prompt)
         self._init_thought(tokens)
         self.history = list(tokens)
         self.thought_trace = [self.thought.copy()]
-        for _ in range(int(max_tokens)):
-            for _ in range(self.think_steps):
-                self.think_step()
-            last = self.history[-1] if self.history else ''
-            nxt = self.speak_step(last) if last else None
-            if nxt is None:
-                break
-            self.history.append(nxt)
+
+        # Pack 198: auto-route prompt to a frame, lock substrate to it.
+        prev_frame_hv = None
+        prev_frame_tag = None
+        active_frame_idx = None
+        if auto_frame and hasattr(self.org, 'frames') and self.org.frames is not None \
+                and self.org.frames.locked:
+            try:
+                idx, fhv, _ = self.org.frames.route_prompt(tokens, self.org.unified.ck)
+                if fhv is not None and hasattr(self.org.unified, 'set_frame'):
+                    prev_frame_hv = self.org.unified.current_frame_hv
+                    prev_frame_tag = getattr(self.org.unified, '_current_frame_tag', None)
+                    self.org.unified.set_frame(fhv, frame_tag=f'f{idx}')
+                    active_frame_idx = idx
+                    self._active_frame_idx = idx
+            except Exception:
+                pass
+
+        try:
+            for _ in range(int(max_tokens)):
+                for _ in range(self.think_steps):
+                    self.think_step()
+                last = self.history[-1] if self.history else ''
+                nxt = self.speak_step(last) if last else None
+                if nxt is None:
+                    break
+                self.history.append(nxt)
+        finally:
+            # Restore frame state.
+            if hasattr(self.org.unified, 'set_frame'):
+                if prev_frame_hv is None:
+                    self.org.unified.clear_frame()
+                else:
+                    self.org.unified.set_frame(prev_frame_hv, frame_tag=prev_frame_tag)
+            self._active_frame_idx = None
+
         out = ' '.join(self.history)
         if return_trace:
             return out, self.thought_trace
         return out
 
-    #  inject new knowledge mid-generation
+    # ── inject new knowledge mid-generation ──────────────────────────────
     def inject_fact(self, hypo, role, target, n=20):
         """Online learning during generation. Subsequent tokens see this fact."""
         self.org.unified.assert_relation(hypo, role, target) if hasattr(

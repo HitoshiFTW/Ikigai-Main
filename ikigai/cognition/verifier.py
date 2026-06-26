@@ -1,5 +1,11 @@
 """
-ikigai.cognition.verifier -- VSA Test-Time Verifier Loop (Day 54 Pack 19).
+DEPRECATED (Day 77 Pack 278 v0).  GSM8K-specific verifier loop.  Replaced
+by substrate-native math via Pack 254 RHC.  Kept while integrate.py Pack
+211 verifier_scores still cite the SelfVerifier (separate file); this
+module's free functions are scheduled for deletion in Pack 278 v1.
+DO NOT add new call-sites.
+
+ikigai.cognition.verifier — VSA Test-Time Verifier Loop (Day 54 Pack 19).
 
 Rank 2 invention from research (+25% GSM8K projected, +50pts achieved on hard test).
 Implicit fixed-point inference: generate K candidate arithmetic trajectories,
@@ -252,7 +258,7 @@ def extract_numbers_smart(text):
         re.IGNORECASE
     )
     ordinal_vals = set(int(m.group(1)) for m in ORDINAL_CTX.finditer(text_norm))
-    raw = re.findall(r'-?\d+', text_norm)  # integers only -- avoids "6." matching issue
+    raw = re.findall(r'-?\d+', text_norm)  # integers only — avoids "6." matching issue
     return [float(n) for n in raw if int(n) not in ordinal_vals]
 
 
@@ -279,7 +285,7 @@ def _try_rate_invariant(text):
     nums = re.findall(r'\d+', t)
     if not nums:
         return None
-    # pattern: first 3 numbers are N,N,N (same) -> answer is N
+    # pattern: first 3 numbers are N,N,N (same) → answer is N
     if len(nums) >= 3 and nums[0] == nums[1] == nums[2]:
         result = float(nums[0])
         return result, [('divide', result, 1.0, result)], -12.0
@@ -450,7 +456,7 @@ def _detect_final_op(text):
     if re.search(r'\bin total\b', q) and 'cost' not in q and 'price' not in q:
         return ['add', 'multiply']
 
-    # DIVIDE signals -- search FULL text since "equally/evenly" often in setup sentence
+    # DIVIDE signals — search FULL text since "equally/evenly" often in setup sentence
     if re.search(r'\b(equally|evenly)\b', full):
         return ['divide']
     if re.search(r'\baverage\b', q):
@@ -472,29 +478,29 @@ def preprocess_relational(text):
     # word numbers: "dozen", "score", etc.
     for word, val in _WORD_NUMS.items():
         if word in t:
-            # find preceding number: "3 dozen" -> inject 36
+            # find preceding number: "3 dozen" → inject 36
             m = re.search(r'(\d+(?:\.\d+)?)\s+' + word, t)
             if m:
                 extra.append(str(int(float(m.group(1)) * val)))
             else:
                 extra.append(str(val))
 
-    # "twice as many/much" -> find following/preceding number, inject *2
+    # "twice as many/much" → find following/preceding number, inject ×2
     m = re.search(r'twice\s+as\s+(?:many|much)(?:\s+as)?\s+(\d+)', t)
     if m: extra.append(str(int(m.group(1)) * 2))
 
-    # "half as many/much/that" -> find following/preceding number, inject /2
+    # "half as many/much/that" → find following/preceding number, inject ÷2
     m = re.search(r'half\s+(?:as\s+(?:many|much)|that\s+much)(?:\s+as)?\s+(\d+)', t)
     if m: extra.append(str(int(m.group(1)) // 2))
     # also: "half that much" after a number
     m = re.search(r'(\d+).*?half\s+that', t)
     if m: extra.append(str(int(m.group(1)) // 2))
 
-    # "N times as many as X" -> inject N*X
+    # "N times as many as X" → inject N*X
     m = re.search(r'(\d+)\s+times\s+as\s+(?:many|much)\s+as\s+(\d+)', t)
     if m: extra.append(str(int(m.group(1)) * int(m.group(2))))
 
-    # percentage: "X% of Y" -> inject X*Y/100
+    # percentage: "X% of Y" → inject X*Y/100
     for pm in re.finditer(r'(\d+(?:\.\d+)?)\s*%\s*of\s+(\d+(?:\.\d+)?)', t):
         extra.append(str(float(pm.group(1)) * float(pm.group(2)) / 100))
 

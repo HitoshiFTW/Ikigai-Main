@@ -20,7 +20,7 @@ Two-term tradeoff:
     - Pragmatic (exploit): match goal directly
     - Epistemic (explore): reduce uncertainty about unfamiliar actions
 
-Bio: dopamine = reward prediction error = -gradFE. Action selection in BG.
+Bio: dopamine = reward prediction error = -∇FE. Action selection in BG.
 
 vs LLM: action selection = autoregressive next-token. No goal-conditioning.
         FEActionSelector: explicit FE gradient on belief field. Plan-aware.
@@ -85,7 +85,7 @@ class FreeEnergyActionSelector:
         self.d         = d
         self._actions  = {}     # name -> (action_hv, outcome_hv, prior_weight)
 
-    #  registration
+    # ── registration ──────────────────────────────────────────────────────
 
     def register_action(self, name, action_tokens, outcome_tokens, prior_weight=1.0):
         a_hv = _encode(action_tokens,  self.d)
@@ -101,7 +101,7 @@ class FreeEnergyActionSelector:
         e = self._actions.get(name)
         return e[1] if e else None
 
-    #  free-energy components
+    # ── free-energy components ────────────────────────────────────────────
 
     def pragmatic_value(self, action_name, goal_tokens):
         """+cos(predicted_outcome, goal). Higher = action achieves goal."""
@@ -131,7 +131,7 @@ class FreeEnergyActionSelector:
         fe = -pv - lam * ev - 0.1 * np.log(prior + 1e-6)
         return float(fe)
 
-    #  selection
+    # ── selection ─────────────────────────────────────────────────────────
 
     def select(self, goal_tokens, belief_field_hv=None, lam=0.3, top_k=1):
         """Returns [(action_name, fe), ...] ascending FE (best first)."""
@@ -147,7 +147,7 @@ class FreeEnergyActionSelector:
         sel = self.select(goal_tokens, belief_field_hv, lam, top_k=1)
         return sel[0][0] if sel else None
 
-    #  batch evaluation
+    # ── batch evaluation ──────────────────────────────────────────────────
 
     def fe_landscape(self, goal_tokens, belief_field_hv=None, lam=0.3):
         """Return dict {action_name: fe} over all actions."""
@@ -156,7 +156,7 @@ class FreeEnergyActionSelector:
             for name in self._actions
         }
 
-    #  introspection
+    # ── introspection ─────────────────────────────────────────────────────
 
     @property
     def n_actions(self):

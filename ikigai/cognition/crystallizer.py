@@ -43,7 +43,7 @@ class AtomicCrystallineStore:
         self._counts = {}   # (s, p, o) -> int
         self._wal = []      # ordered list of (s, p, o) observations
 
-    #  core triple store
+    # ─── core triple store ────────────────────────────────────────
 
     def observe(self, s, p, o):
         """Atomic CAS increment. Monotone: count never decreases."""
@@ -69,7 +69,7 @@ class AtomicCrystallineStore:
         p = str(predicate)
         return [(k, v) for k, v in self._counts.items() if k[1] == p]
 
-    #  anti-unification
+    # ─── anti-unification ─────────────────────────────────────────
 
     def anti_unify(self, triple_a, triple_b):
         """Most-general schema covering both triples. Mismatched fields -> WILDCARD."""
@@ -98,7 +98,7 @@ class AtomicCrystallineStore:
             for j in range(i + 1, len(triples)):
                 schema = self.anti_unify(triples[i], triples[j])
                 if WILDCARD not in schema:
-                    continue   # trivial (identical triples) -- skip
+                    continue   # trivial (identical triples) — skip
                 if schema in seen:
                     continue
                 support = self.schema_support(schema)
@@ -106,7 +106,7 @@ class AtomicCrystallineStore:
                     seen[schema] = support
         return seen
 
-    #  WAL persistence
+    # ─── WAL persistence ─────────────────────────────────────────
 
     def save_wal(self, path):
         """Write all WAL entries to disk (tab-separated s p o, one per line)."""
@@ -125,7 +125,7 @@ class AtomicCrystallineStore:
                 if len(parts) == 3:
                     self.observe(*parts)
 
-    #  stats
+    # ─── stats ────────────────────────────────────────────────────
 
     def summary(self):
         return {

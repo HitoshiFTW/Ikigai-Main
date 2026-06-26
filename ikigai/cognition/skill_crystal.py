@@ -1,22 +1,22 @@
 """
 ikigai.cognition.skill_crystal -- One-Shot Skill Crystallization.
 
-Day 55 Pack 42 -- Decisive *3 completion.
+Day 55 Pack 42 -- Decisive ★3 completion.
 
 Problem: LLMs learn novel patterns only via gradient fine-tuning.
          Fine-tuning: hours GPU + catastrophic forgetting.
          1B transformer learning pattern 20 overwrites patterns 1-19.
 
 Fix: skill_hv = bind(intent_hv, procedure_hv)
-     Bind = component-wise multiply for bipolar +/-1 HVs.
+     Bind = component-wise multiply for bipolar ±1 HVs.
      Unbind = same (self-inverse: bind(bind(a,b),a) = b exactly).
      Storage: one slot per skill, never touched by other skills.
 
 No-forgetting proof: _skills[name] modified ONLY when learn(name,...) called.
-                     learn(name_k) for k!=j leaves _skills[name_j] unchanged.
+                     learn(name_k) for k≠j leaves _skills[name_j] unchanged.
                      This is arithmetic, not probability.
 
-One-shot: count=1 -> rank=1 recall. No iterations. No gradient.
+One-shot: count=1 → rank=1 recall. No iterations. No gradient.
 
 vs LLM: 1B transformer needs fine-tuning to learn novel skill.
         Fine-tuning hours. Forgetting guaranteed at scale.
@@ -27,7 +27,7 @@ import numpy as np
 
 
 def _hv(word, d):
-    """Bipolar +/-1 HV -- 'skill::' namespace separate from BSPM."""
+    """Bipolar ±1 HV — 'skill::' namespace separate from BSPM."""
     seed = hash(f'skill::{word}') & 0x7FFFFFFF
     rng = np.random.RandomState(seed)
     return (rng.randint(0, 2, size=d) * 2 - 1).astype(np.float32)
@@ -44,15 +44,15 @@ def _encode(tokens, d):
 
 
 def _bind(a, b):
-    """Bipolar bind = component-wise multiply. Self-inverse for +/-1 vectors."""
+    """Bipolar bind = component-wise multiply. Self-inverse for ±1 vectors."""
     return a * b
 
 
-_unbind = _bind  # bind(bind(a,b), a) = a^2.b = b for bipolar +/-1
+_unbind = _bind  # bind(bind(a,b), a) = a²·b = b for bipolar ±1
 
 
 def _sim(a, b, d):
-    """Similarity for bipolar HVs: dot(a,b)/d  in  [-1, 1]."""
+    """Similarity for bipolar HVs: dot(a,b)/d ∈ [-1, 1]."""
     return float(np.dot(a, b)) / d
 
 
@@ -71,16 +71,16 @@ class SkillCrystal:
 
     def __init__(self, d=400):
         self.d = d
-        self._skills = {}  # name -> {intent_hv, proc_hv, skill_hv, ...}
-        self._counts = {}  # name -> learn count (monotone)
+        self._skills = {}  # name → {intent_hv, proc_hv, skill_hv, ...}
+        self._counts = {}  # name → learn count (monotone)
 
-    #  learning
+    # ── learning ──────────────────────────────────────────────────────────
 
     def learn(self, name, intent_tokens, proc_tokens):
         """
         Crystallize one skill from one example. Idempotent: multiple calls
         with same name bundle via majority vote (strengthens representation).
-        Returns skill_hv (bipolar +/-1).
+        Returns skill_hv (bipolar ±1).
         """
         intent_hv = _encode(intent_tokens, self.d)
         proc_hv   = _encode(proc_tokens,   self.d)
@@ -112,7 +112,7 @@ class SkillCrystal:
         self._counts[name] = self._counts.get(name, 0) + 1
         return self._skills[name]['skill_hv'].copy()
 
-    #  retrieval
+    # ── retrieval ─────────────────────────────────────────────────────────
 
     def recall(self, query_tokens, top_k=3):
         """
@@ -132,7 +132,7 @@ class SkillCrystal:
     def apply(self, name):
         """
         Recover procedure_hv via unbind: proc = unbind(skill_hv, intent_hv).
-        Returns bipolar +/-1 procedure HV for decoding.
+        Returns bipolar ±1 procedure HV for decoding.
         """
         if name not in self._skills:
             return np.zeros(self.d, dtype=np.float32)
@@ -154,8 +154,8 @@ class SkillCrystal:
         """
         For each skill, query by stored intent_tokens (re-encoded from scratch).
         Returns {name: (rank, top_score)}.
-        rank=1 -> correct top-1 recall.
-        All rank=1 after N skills -> no-forgetting demonstration.
+        rank=1 → correct top-1 recall.
+        All rank=1 after N skills → no-forgetting demonstration.
         """
         names = list(self._skills.keys())
         results = {}
@@ -167,7 +167,7 @@ class SkillCrystal:
             results[name] = (rank, all_scores[0][1])
         return results
 
-    #  stats
+    # ── stats ─────────────────────────────────────────────────────────────
 
     def skill_count(self, name):
         return self._counts.get(name, 0)

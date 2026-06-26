@@ -1,4 +1,14 @@
 """
+DEPRECATED (Day 77 Pack 278 v0).  Substrate-native reasoning is now Pack
+254 RHC (math) + Pack 255 GeneralReasoner (compositional) + Pack 273
+anchor-action cache + Pack 276 Cat4Dopamine.  This module's hardcoded
+OPERATOR_LEXICON violates the "no hardcoding" rule (Day 75 close);
+Phase 5 of integrate.read_statement still calls into it but is queued
+for deletion in Pack 278 v1 (Day 78) after bench gate confirms
+removal does not regress 25/25.  DO NOT add new call-sites.  DO NOT
+extend OPERATOR_LEXICON.  See `c:/neuroseed/MEMORY.md` Pack 278 entry
+and the Day 77 research log for the migration plan.
+
 ikigai.cognition.reasoning_engine -- Generative Reasoning Core.
 
 Day 56 Pack 93 -- the missing capability: ACTUALLY REASON, not retrieve.
@@ -24,47 +34,12 @@ This is the generative core that lets Ikigai THINK, not just retrieve.
 import re
 from collections import deque
 
-# Operator lexicon: verb-stem -> (operator_type, valence)
-# valence: +1 = adds to variable, -1 = removes
-OPERATOR_LEXICON = {
-    # SET (declarative)
-    'has':       ('SET', None),  'have':      ('SET', None),
-    'owns':      ('SET', None),  'contains':  ('SET', None),
-    'is':        ('SET', None),  'are':       ('SET', None),
-    'holds':     ('SET', None),  'starts':    ('SET', None),
-
-    # ADD
-    'gets':      ('ADD', +1),    'receives':  ('ADD', +1),
-    'gains':     ('ADD', +1),    'finds':     ('ADD', +1),
-    'buys':      ('ADD', +1),    'adds':      ('ADD', +1),
-    'earns':     ('ADD', +1),    'earned':    ('ADD', +1),
-    'collects':  ('ADD', +1),    'collected': ('ADD', +1),
-    'picks':     ('ADD', +1),    'picked':    ('ADD', +1),
-    'wins':      ('ADD', +1),    'won':       ('ADD', +1),
-    'adopts':    ('ADD', +1),    'adopt':     ('ADD', +1),
-    'adopted':   ('ADD', +1),    'bought':    ('ADD', +1),
-    'found':     ('ADD', +1),    'received':  ('ADD', +1),
-    'gained':    ('ADD', +1),    'added':     ('ADD', +1),
-
-    # SUB
-    'ate':       ('SUB', -1),    'eats':      ('SUB', -1),
-    'gives':     ('SUB', -1),    'gave':      ('SUB', -1),
-    'loses':     ('SUB', -1),    'lost':      ('SUB', -1),
-    'spends':    ('SUB', -1),    'spent':     ('SUB', -1),
-    'sells':     ('SUB', -1),    'sold':      ('SUB', -1),
-    'uses':      ('SUB', -1),    'used':      ('SUB', -1),
-    'drops':     ('SUB', -1),    'breaks':    ('SUB', -1),
-    'removes':   ('SUB', -1),    'throws':    ('SUB', -1),
-
-    # MUL (rate * count)
-    'each':      ('MUL', None),  'per':       ('MUL', None),
-    'every':     ('MUL', None),  'times':     ('MUL', None),
-
-    # DIV
-    'share':     ('DIV', None),  'shares':    ('DIV', None),
-    'split':     ('DIV', None),  'divide':    ('DIV', None),
-    'among':     ('DIV', None),
-}
+# Pack 278 v1 (Day 77): OPERATOR_LEXICON purged.  Substrate-native
+# operator semantics now emerge via Pack 253 cat-3 absorb + Pack 254
+# RHC + Pack 291 multiplicative ⋆ binding.  Day 75 "no hardcoding"
+# rule.  Empty dict preserved so existing call-sites in this module
+# (`tok in OPERATOR_LEXICON`) degrade to "False" without raising.
+OPERATOR_LEXICON = {}
 
 # Query phrases
 QUERY_MARKERS = [
@@ -76,7 +51,7 @@ QUERY_MARKERS = [
 PRONOUNS = {'she', 'he', 'it', 'they', 'her', 'him', 'them', 'his', 'hers'}
 
 
-#  token utilities
+# ── token utilities ──────────────────────────────────────────────────────────
 
 def tokenize(text):
     """Lowercase, strip punct except $, %, ?."""
@@ -91,7 +66,7 @@ def extract_number(tokens, i):
     return None
 
 
-#  Working memory
+# ── Working memory ───────────────────────────────────────────────────────────
 
 class WorkingMemory:
     """
@@ -159,7 +134,7 @@ class WorkingMemory:
         return list(self._history)
 
 
-#  Sentence parser
+# ── Sentence parser ──────────────────────────────────────────────────────────
 
 class Statement:
     """One parsed statement: entity, op, value, obj."""
@@ -281,7 +256,7 @@ class ReasoningParser:
         return target_obj, target_entity
 
 
-#  Reasoning engine (the core)
+# ── Reasoning engine (the core) ──────────────────────────────────────────────
 
 class ReasoningEngine:
     """

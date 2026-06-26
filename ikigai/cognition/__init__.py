@@ -1,4 +1,4 @@
-"""ikigai.cognition -- high-level reasoning capabilities atop the organism."""
+"""ikigai.cognition — high-level reasoning capabilities atop the organism."""
 
 from ikigai.cognition.routers import ToolRouter
 from ikigai.cognition.memory import TransitionMemory
@@ -109,9 +109,9 @@ from ikigai.cognition.benchmark_harness_v2 import (
     Problem, SolverResult, BenchmarkReport, BenchmarkHarness,
     numeric_scorer, exact_match_scorer, multiple_choice_scorer, code_exec_scorer,
 )
-from ikigai.cognition.gsm8k_solver_v2 import solve_v2 as solve_gsm8k_v2
-from ikigai.cognition.gsm8k_solver_v3 import solve_v3 as solve_gsm8k_v3
-from ikigai.cognition.gsm8k_solver_v4 import solve_v4 as solve_gsm8k_v4
+# Day 75: gsm8k_solver_v2-v4 retired -- replaced by Pack 254 MathEval
+# (engine='auto', Pack 257 RHC) + Pack 253 emergent operator + word-magnitude
+# grounding. Old solvers were hand-curated handler stacks.
 from ikigai.cognition.cgpsp_encoder import CGPSPEncoder
 from ikigai.cognition.pi_k_algebra import PiK
 from ikigai.cognition.pgmw import PersonaGrid

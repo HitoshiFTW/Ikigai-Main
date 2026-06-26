@@ -196,7 +196,7 @@ class BenchmarkHarness:
         return len(self._problems)
 
 
-#  Built-in scorers
+# ── Built-in scorers ───────────────────────────────────────────────────────
 
 def numeric_scorer(problem, result):
     """Compare extracted numeric answer to expected number (with tolerance)."""

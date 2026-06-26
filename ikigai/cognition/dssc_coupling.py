@@ -169,7 +169,7 @@ class ParallelSemSynCoupling:
         self.emit_history = []
         self.transition_log = []   # (prev_node, picked_node) tuples for verification
 
-    #  encoding
+    # ─── encoding ────────────────────────────────────────────────────
 
     def encode_semantic(self, tokens):
         """Bundle bipolar token HVs into a single L2-normalized semantic vector."""
@@ -180,7 +180,7 @@ class ParallelSemSynCoupling:
             s = s + _token_hv(t, self.d_sem)
         return _l2_normalize(s)
 
-    #  grammar selection
+    # ─── grammar selection ──────────────────────────────────────────
 
     def pick_grammar(self, S, allow_global=False):
         """Argmax cosine(S, proto[g]) over valid CFG successors of current node."""
@@ -195,13 +195,13 @@ class ParallelSemSynCoupling:
         best = int(np.argmax(sims))
         return valid[best]
 
-    #  emit
+    # ─── emit ────────────────────────────────────────────────────────
 
     def emit(self, S, G_id):
         """emit[k] = sum_i S[i] * T[i, G_id, k]"""
         return self.T_couple[:, G_id, :].T @ S
 
-    #  full step
+    # ─── full step ──────────────────────────────────────────────────
 
     def step(self, tokens, allow_global=False, learn_target=None):
         """Encode -> pick grammar -> emit -> (optional) Hebbian learn."""
@@ -217,14 +217,14 @@ class ParallelSemSynCoupling:
         self.emit_history.append((tokens, G_id, emit_vec))
         return emit_vec, G_id
 
-    #  learning
+    # ─── learning ───────────────────────────────────────────────────
 
     def hebbian_update(self, S, G_id, target):
         """T[i, G_id, k] += eta * S[i] * target[k]."""
         delta = (self.eta * np.outer(S, target)).astype(np.float32)
         self.T_couple[:, G_id, :] += delta
 
-    #  utility
+    # ─── utility ────────────────────────────────────────────────────
 
     def grammar_name(self, node_id):
         return self.cfg.name(node_id)

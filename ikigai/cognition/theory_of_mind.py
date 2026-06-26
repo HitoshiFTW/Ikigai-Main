@@ -118,7 +118,7 @@ class TheoryOfMindSandbox:
         self._agents          = {}      # name -> AgentMind
         self._world           = {}      # key_tuple -> value_hv (ground truth)
 
-    #  agent registry
+    # ── agent registry ────────────────────────────────────────────────────
 
     def add_agent(self, name):
         if name not in self._agents:
@@ -135,7 +135,7 @@ class TheoryOfMindSandbox:
     def agent_names(self):
         return list(self._agents.keys())
 
-    #  world state
+    # ── world state ───────────────────────────────────────────────────────
 
     def set_world(self, key_tokens, value_tokens):
         """Ground truth in the environment."""
@@ -144,7 +144,7 @@ class TheoryOfMindSandbox:
     def world(self, key_tokens):
         return self._world.get(tuple(key_tokens))
 
-    #  belief setters
+    # ── belief setters ────────────────────────────────────────────────────
 
     def set_belief(self, agent_name, key_tokens, value_tokens):
         self.add_agent(agent_name).set(key_tokens, value_tokens)
@@ -152,7 +152,7 @@ class TheoryOfMindSandbox:
     def set_meta_belief(self, viewer_agent, target_agent, key_tokens, value_tokens):
         self.add_agent(viewer_agent).set_meta(target_agent, key_tokens, value_tokens)
 
-    #  belief queries
+    # ── belief queries ────────────────────────────────────────────────────
 
     def get_belief(self, agent_name, key_tokens):
         a = self._agents.get(agent_name)
@@ -195,7 +195,7 @@ class TheoryOfMindSandbox:
                     return False
         return True
 
-    #  perspective / false-belief
+    # ── perspective / false-belief ────────────────────────────────────────
 
     def perspective_shift(self, agent_name, key_tokens):
         """Returns the HV reflecting agent's belief about key."""

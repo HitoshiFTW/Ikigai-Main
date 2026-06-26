@@ -95,7 +95,7 @@ class CausalWorldModel:
     def _perm(self, hv):
         return np.roll(hv, self._perm_shift)
 
-    #  vocabulary
+    # ── vocabulary ────────────────────────────────────────────────────────
 
     def add_state(self, name, tokens=None):
         if tokens is None:
@@ -117,7 +117,7 @@ class CausalWorldModel:
     def action_hv(self, name):
         return self._actions.get(name)
 
-    #  transitions
+    # ── transitions ───────────────────────────────────────────────────────
 
     def add_transition(self, state_name, action_name, next_state_name):
         """
@@ -145,7 +145,7 @@ class CausalWorldModel:
     def n_transitions(self):
         return len(self._edges)
 
-    #  prediction
+    # ── prediction ────────────────────────────────────────────────────────
 
     def predict(self, state_name, action_name, candidate_states=None, top_k=3):
         """
@@ -179,7 +179,7 @@ class CausalWorldModel:
         results.sort(key=lambda x: -x[1])
         return results[:top_k]
 
-    #  rollout
+    # ── rollout ───────────────────────────────────────────────────────────
 
     def rollout(self, start_state, action_seq, top_k=1):
         """
@@ -197,7 +197,7 @@ class CausalWorldModel:
             current = next_state
         return trajectory
 
-    #  causal explanation
+    # ── causal explanation ────────────────────────────────────────────────
 
     def explain(self, target_state, current_state, candidate_actions=None, depth=3):
         """
@@ -230,7 +230,7 @@ class CausalWorldModel:
                 queue.append((next_state, path + [action]))
         return [], False
 
-    #  introspection
+    # ── introspection ─────────────────────────────────────────────────────
 
     @property
     def n_states(self):

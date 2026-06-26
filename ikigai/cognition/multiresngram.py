@@ -85,7 +85,7 @@ class MultiResNGram:
         self._sentence_buffer = []   # last sentence boundary markers
         self._turn_count = 0
 
-    #  training
+    # ── training ──────────────────────────────────────────────────────────
 
     def train_turn(self, tokens):
         """
@@ -114,7 +114,7 @@ class MultiResNGram:
         self.tok_gram.train(sentence_tokens)
         self.sent_gram.train(sentence_tokens)
 
-    #  expansion
+    # ── expansion ─────────────────────────────────────────────────────────
 
     def expand(self, seed_words, max_len=None):
         """
@@ -213,7 +213,7 @@ class MultiResNGram:
         scored.sort(key=lambda x: -x[1])
         return [w for w, _ in scored]
 
-    #  stats
+    # ── stats ─────────────────────────────────────────────────────────────
 
     @property
     def tok_entries(self):

@@ -93,7 +93,7 @@ def _cosine(a, b):
 
 class HolographicMemory:
     """
-    VSA crystal: bundle of (key (x) value) bindings.
+    VSA crystal: bundle of (key ⊗ value) bindings.
     O(1) recall via bind(crystal, query_key) + cosine match.
     """
 
@@ -107,11 +107,11 @@ class HolographicMemory:
         self._v_toks  = {}   # name -> value token list
         self._order   = []   # insertion order
 
-    #  store
+    # ── store ──────────────────────────────────────────────────────────────
 
     def store(self, name, key_tokens, value_tokens):
         """
-        Bind key (x) value and superpose into crystal.
+        Bind key ⊗ value and superpose into crystal.
         Overwrites previous binding for same name.
         """
         k_hv = _encode(key_tokens, self.d)
@@ -134,14 +134,14 @@ class HolographicMemory:
         self._k_toks[name] = list(key_tokens)
         self._v_toks[name] = list(value_tokens)
 
-    #  recall
+    # ── recall ────────────────────────────────────────────────────────────
 
     def _score(self, q_hv):
         """
         Raw dot-product recall scores against all stored values.
         Uses crystal_accum (int32) to preserve magnitude info.
-        recovered[p] = accum[p] * q[p] ~= v_j[p] + noise  for q ~= k_j
-        dot(recovered, v_j) ~= d (signal) + eps (noise, mean 0)
+        recovered[p] = accum[p] * q[p] ≈ v_j[p] + noise  for q ≈ k_j
+        dot(recovered, v_j) ≈ d (signal) + eps (noise, mean 0)
         SNR = d / sqrt(d*(N-1)) = sqrt(d/(N-1))
         """
         q = q_hv.astype(np.int32)
@@ -179,7 +179,7 @@ class HolographicMemory:
         score  = scores.get(name, 0.0) / self.d
         return self._v_toks[name], float(score)
 
-    #  metrics
+    # ── metrics ───────────────────────────────────────────────────────────
 
     @property
     def n_stored(self):
@@ -198,7 +198,7 @@ class HolographicMemory:
         """Test recall for every stored name. Returns {name: sim}."""
         return {name: self.recall_exact(name)[1] for name in self._order}
 
-    #  introspection
+    # ── introspection ─────────────────────────────────────────────────────
 
     def key_tokens(self, name):
         return list(self._k_toks.get(name, []))

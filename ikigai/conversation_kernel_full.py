@@ -79,7 +79,7 @@ class ConversationKernelFull:
         # Running user vocab (all tokens seen so far)
         self._user_vocab = set()
 
-    #  core chat
+    # ─── core chat ───────────────────────────────────────────────
 
     def chat(self, text, role='user'):
         """
@@ -154,7 +154,7 @@ class ConversationKernelFull:
             C_U=out.C_U,
         )
 
-    #  quality trends
+    # ─── quality trends ──────────────────────────────────────────
 
     def emit_cos_trend(self):
         """(mean early 5 turns, mean late 5 turns) of emit_cos."""
@@ -180,7 +180,7 @@ class ConversationKernelFull:
         late  = [q['F_t'] for q in self.quality_log[-5:]]
         return float(np.mean(early)), float(np.mean(late))
 
-    #  pass-through accessors
+    # ─── pass-through accessors ──────────────────────────────────
 
     @property
     def turn_count(self):

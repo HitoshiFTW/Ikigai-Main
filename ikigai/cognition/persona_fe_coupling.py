@@ -1,5 +1,5 @@
 """
-ikigai.cognition.persona_fe_coupling -- Persona * Free-Energy Coupling.
+ikigai.cognition.persona_fe_coupling -- Persona × Free-Energy Coupling.
 
 Day 55 Pack 75 -- Phase B: voice/style depends on internal FE state.
 
@@ -27,7 +27,7 @@ Bio: limbic system (mood) + prefrontal (deliberation) jointly shape behavior.
      Anxiety (high cortisol) -> more cautious responses.
 
 vs LLM: persona = prompt-engineered, brittle.
-        Persona*FE: emergent from internal state. Real-time adaptive.
+        Persona×FE: emergent from internal state. Real-time adaptive.
 """
 
 import numpy as np
@@ -91,7 +91,7 @@ class PersonaFEC:
         self.set_coupling('confidence',      CERTAINTY,  +1.0)
         self.set_coupling('confidence',      VALENCE,    +0.3)
 
-    #  metric updates
+    # ── metric updates ────────────────────────────────────────────────────
 
     def set_fe_metric(self, name, value):
         self._metrics[name] = float(value)
@@ -104,7 +104,7 @@ class PersonaFEC:
             self._couplings[metric_name] = {}
         self._couplings[metric_name][int(dim_idx)] = float(weight)
 
-    #  persona computation
+    # ── persona computation ──────────────────────────────────────────────
 
     def compute(self):
         """Recompute persona vector from current metrics + couplings."""
@@ -142,7 +142,7 @@ class PersonaFEC:
         if p[TECHNICALITY] < -0.3: adjectives.append('plain')
         return ', '.join(adjectives) if adjectives else 'neutral'
 
-    #  integration with organism
+    # ── integration with organism ─────────────────────────────────────────
 
     def update_from_organism(self, organism):
         """

@@ -5,7 +5,7 @@ Day 55 Pack 65 -- invention #9: behavior trace -> program HV.
 
 Forward compilation:
     program_tokens -> program_hv (encoded VSA)
-    program_hv (+) input_hv -> output_hv  (forward execution)
+    program_hv ⊕ input_hv -> output_hv  (forward execution)
 
 Inverse compilation:
     Given many (input_i, output_i) examples,
@@ -91,7 +91,7 @@ class InverseCompiler:
         self.d        = d
         self._programs = {}     # name -> program_hv
 
-    #  registration
+    # ── registration ──────────────────────────────────────────────────────
 
     def register(self, name, program_tokens, io_examples=None):
         """
@@ -118,7 +118,7 @@ class InverseCompiler:
     def program_hv(self, name):
         return self._programs.get(name)
 
-    #  forward execution
+    # ── forward execution ─────────────────────────────────────────────────
 
     def forward(self, name, input_tokens):
         """Apply program forward: bind(program_hv, input_hv) -> predicted output HV."""
@@ -127,12 +127,12 @@ class InverseCompiler:
             return None
         return _bind(p, _encode(input_tokens, self.d))
 
-    #  inverse compilation
+    # ── inverse compilation ──────────────────────────────────────────────
 
     def induce(self, io_examples):
         """
         From (input, output) pairs, induce aggregate program HV.
-        program_hv ~= sign(sum over i of bind(input_i, output_i)).
+        program_hv ≈ sign(sum over i of bind(input_i, output_i)).
         """
         if not io_examples:
             return np.zeros(self.d, dtype=np.float32)
@@ -153,7 +153,7 @@ class InverseCompiler:
         results.sort(key=lambda x: -x[1])
         return results[:top_k]
 
-    #  verification
+    # ── verification ──────────────────────────────────────────────────────
 
     def verify(self, program_name, io_examples, threshold=0.3):
         """
@@ -172,7 +172,7 @@ class InverseCompiler:
         n_total = len(io_examples)
         return n_correct, n_total, (n_correct / n_total if n_total else 0.0)
 
-    #  introspection
+    # ── introspection ─────────────────────────────────────────────────────
 
     @property
     def n_programs(self):

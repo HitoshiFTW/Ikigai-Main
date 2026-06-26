@@ -89,7 +89,7 @@ class VSACalculus:
     def __init__(self, d=400):
         self.d = d
 
-    #  bind differentiation
+    # ── bind differentiation ──────────────────────────────────────────────
 
     def grad_bind(self, f_hv, g_hv):
         """
@@ -111,11 +111,11 @@ class VSACalculus:
             result = _bind(result, h)
         return result
 
-    #  bundle differentiation
+    # ── bundle differentiation ────────────────────────────────────────────
 
     def grad_bundle(self, hvs, target_idx):
         """
-        dbundle(hvs)/dhvs[target_idx].
+        ∂bundle(hvs)/∂hvs[target_idx].
         Position p is decisive: removing hvs[target_idx] at p changes the bundle output.
         Computed exactly: compare bundle_with vs bundle_without at each position.
         Returns binary mask (1.0 where decisive, 0.0 elsewhere).
@@ -136,7 +136,7 @@ class VSACalculus:
         without_target = _bsign(accum_others)
         return (with_target != without_target).astype(np.float32)
 
-    #  solve / unbind
+    # ── solve / unbind ────────────────────────────────────────────────────
 
     def solve_bind(self, c_hv, b_hv):
         """
@@ -156,7 +156,7 @@ class VSACalculus:
             result = _bind(result, h)
         return result
 
-    #  credit assignment
+    # ── credit assignment ─────────────────────────────────────────────────
 
     def credit_assign(self, output_hv, input_hvs, target_hv):
         """
@@ -177,7 +177,7 @@ class VSACalculus:
             credits.append(credit)
         return credits
 
-    #  update step
+    # ── update step ───────────────────────────────────────────────────────
 
     def update_toward(self, hv, target_hv, lr=0.5):
         """
@@ -203,7 +203,7 @@ class VSACalculus:
             curr = self.update_toward(curr, target_hv, lr)
         return curr, max_steps, _cosine(curr, target_hv)
 
-    #  error energy
+    # ── error energy ──────────────────────────────────────────────────────
 
     def error_energy(self, output_hv, target_hv):
         """

@@ -4,7 +4,7 @@ ikigai.cognition.counterfactual_sim -- Counterfactual Simulator.
 Day 55 Pack 64 -- invention #8: N parallel futures in single HV superposition.
 
 Architecture:
-    Each scenario: (action_hv, outcome_hv) bound -> action (+) outcome
+    Each scenario: (action_hv, outcome_hv) bound -> action ⊕ outcome
     Superposition: bundle(all scenario binds) -> single counterfactual_hv
     Query "what if action A?" -> bind(counterfactual_hv, A) -> recover outcome A
 
@@ -68,7 +68,7 @@ class CounterfactualField:
     Superposition of N parallel (action, outcome) bindings.
 
     add_scenario(action_tokens, outcome_tokens, weight=1)
-        Append (action (+) outcome) to field.
+        Append (action ⊕ outcome) to field.
 
     query_outcome(action_tokens, candidates_tokens) -> [(name, sim), ...]
         Predict outcome of given action.
@@ -90,10 +90,10 @@ class CounterfactualField:
         self._scenarios = []   # list of (name, action_hv, outcome_hv, weight)
         self._raw_accum = np.zeros(d, dtype=np.int32)   # un-normalized for ranking
 
-    #  construction
+    # ── construction ──────────────────────────────────────────────────────
 
     def add_scenario(self, name, action_tokens, outcome_tokens, weight=1.0):
-        """Add (action (+) outcome) binding to field."""
+        """Add (action ⊕ outcome) binding to field."""
         a_hv = _encode(action_tokens,  self.d)
         o_hv = _encode(outcome_tokens, self.d)
         binding = _bind(a_hv, o_hv)
@@ -108,12 +108,12 @@ class CounterfactualField:
     def field_hv(self):
         return self._field.copy()
 
-    #  queries
+    # ── queries ───────────────────────────────────────────────────────────
 
     def query_outcome(self, action_tokens, candidate_outcome_tokens):
         """
         Given action, rank candidate outcomes by recovery cosine.
-        Recovery: field (+) action_hv ~= outcome (for matching scenario).
+        Recovery: field ⊕ action_hv ~= outcome (for matching scenario).
         """
         a_hv      = _encode(action_tokens, self.d)
         # Use raw_accum for higher-fidelity recovery (preserves signal magnitude)
@@ -136,7 +136,7 @@ class CounterfactualField:
         results.sort(key=lambda x: -x[1])
         return results
 
-    #  planning
+    # ── planning ──────────────────────────────────────────────────────────
 
     def free_energy(self, goal_tokens):
         """
@@ -160,7 +160,7 @@ class CounterfactualField:
         goal_hv = _encode(goal_tokens, self.d)
         best_name, best_score = None, -2.0
         for (name, action_tokens) in action_candidates:
-            # Predicted outcome HV from binding: field (+) action
+            # Predicted outcome HV from binding: field ⊕ action
             a_hv = _encode(action_tokens, self.d)
             predicted = self._raw_accum.astype(np.float32) * a_hv
             # Normalize predicted and compute cos with goal
@@ -174,7 +174,7 @@ class CounterfactualField:
                 best_name  = name
         return best_name, float(best_score)
 
-    #  perturbation / counterfactual edit
+    # ── perturbation / counterfactual edit ────────────────────────────────
 
     def perturb(self, scenario_name, new_outcome_tokens):
         """

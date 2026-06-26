@@ -1,5 +1,5 @@
 """
-ikigai.cognition.conversation -- General-purpose conversational pipeline.
+ikigai.cognition.conversation — General-purpose conversational pipeline.
 
 Binary routing: code queries -> CodeAlpaca kNN, everything else -> General corpus kNN.
 No synthetic domain data. Responses come from real corpus retrieval + local n-gram.
@@ -55,6 +55,10 @@ _EXPR_RE = re.compile(
 )
 
 def _safe_eval(expr):
+    # DEPRECATED Pack 278 v0.  Math now resolved substrate-native via
+    # Pack 254 RHC (additive + Pack 291 multiplicative ⋆ planned).
+    # Kept while IntentRouter math branch in this file still falls
+    # through; both routes scheduled for deletion in Pack 278 v1.
     expr = expr.strip().replace('^', '**')
     for b in ['import', '__', 'open(', 'exec(', 'eval(', 'globals(', 'locals(']:
         if b in expr:
@@ -150,10 +154,14 @@ def _generate(bg, tg, q_context, seed=None, max_len=25, thresh=2):
 
 
 # ---------------------------------------------------------------------------
-# IntentRouter -- binary: code vs general
+# IntentRouter — binary: code vs general
 # ---------------------------------------------------------------------------
 class IntentRouter:
     """
+    DEPRECATED Pack 278 v0.  Hardcoded code/general split.  Substrate
+    routes via Pack 255 GeneralReasoner which composes math/code/lang
+    uniformly without branching.  Scheduled for deletion Pack 278 v1.
+
     Classifies query as 'code' or 'general' using two signals:
     1. Keyword check (fast): any _CODE_WORDS token in query -> code
     2. HV similarity (fallback): TF-IDF query HV vs domain archetype HVs
@@ -222,7 +230,7 @@ class IntentRouter:
 
 
 # ---------------------------------------------------------------------------
-# EpisodicBuffer -- conversation history shifts retrieval
+# EpisodicBuffer — conversation history shifts retrieval
 # ---------------------------------------------------------------------------
 class EpisodicBuffer:
     """
@@ -273,7 +281,7 @@ class EpisodicBuffer:
 
 
 # ---------------------------------------------------------------------------
-# Conversation -- the full pipeline
+# Conversation — the full pipeline
 # ---------------------------------------------------------------------------
 class Conversation:
     """
@@ -375,7 +383,7 @@ class Conversation:
 
 
 # ---------------------------------------------------------------------------
-# Builder -- loads corpora, builds HV matrices, wires everything
+# Builder — loads corpora, builds HV matrices, wires everything
 # ---------------------------------------------------------------------------
 def build_conversation(ctx, code_corpus_path, general_corpus_path,
                        max_code=None, max_gen=None,

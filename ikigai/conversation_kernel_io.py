@@ -136,13 +136,13 @@ class ConversationKernelIO:
             self._vocab[word] = _word_hv(word, self._d)
         return self._vocab[word]
 
-    #  tokenizer
+    # ─── tokenizer ───────────────────────────────────────────────
 
     def tokenize(self, text):
         """Lowercase, strip punctuation, split on non-alpha-numeric."""
         return re.findall(r"[a-z0-9']+", text.lower())
 
-    #  decoder
+    # ─── decoder ─────────────────────────────────────────────────
 
     def decode_to_words(self, belief_hv, top_k=None):
         """
@@ -155,7 +155,7 @@ class ConversationKernelIO:
         scores.sort(key=lambda x: -x[1])
         return [w for w, _ in scores[:k]]
 
-    #  respond
+    # ─── respond ─────────────────────────────────────────────────
 
     def respond(self, user_text, role='user'):
         """
@@ -200,7 +200,7 @@ class ConversationKernelIO:
         self.log.append(entry)
         return response, out
 
-    #  multi-turn demo
+    # ─── multi-turn demo ─────────────────────────────────────────
 
     def run_dialogue(self, exchanges):
         """
@@ -213,7 +213,7 @@ class ConversationKernelIO:
             results.append((text, response, out))
         return results
 
-    #  state
+    # ─── state ───────────────────────────────────────────────────
 
     @property
     def vocab_size(self):

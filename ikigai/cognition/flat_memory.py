@@ -37,7 +37,10 @@ import numpy as np
 
 
 def tokenize(text):
-    return [t for t in re.sub(r"[^a-z0-9'\s]", ' ', text.lower()).split() if t]
+    # Pack 199 -- Unicode-aware: any letter from any script (Latin / Cyrillic /
+    # Greek / CJK / Arabic / Devanagari ...), lowercased. No ASCII hardcode.
+    # Drop digits, underscores, punctuation, control chars.
+    return [t for t in re.findall(r"[^\W\d_]+", text.lower(), flags=re.UNICODE) if t]
 
 
 def _renorm(hv):
@@ -50,7 +53,7 @@ def _cos(a, b, d):
     return float(np.real(np.vdot(a, b))) / d
 
 
-#  Pillar 1: computed (zero-storage) word identity
+# ── Pillar 1: computed (zero-storage) word identity ───────────────────────────
 
 class ComputedKey:
     """
@@ -175,7 +178,7 @@ class ComputedKey:
         self._cache = {}
 
 
-#  Pillar 2: fixed sparse distributed memory substrate
+# ── Pillar 2: fixed sparse distributed memory substrate ───────────────────────
 
 class VSASDM:
     """
@@ -273,7 +276,7 @@ class VSASDM:
             self._loc_cache = {}
 
 
-#  Pillar 3: the flat-memory channel (wraps key + substrate + recall)
+# ── Pillar 3: the flat-memory channel (wraps key + substrate + recall) ────────
 
 class FlatMemory:
     """
@@ -299,7 +302,7 @@ class FlatMemory:
         self._dirty = True
         self.n_exposures = 0
 
-    #  learning
+    # ── learning ──────────────────────────────────────────────────────────
     def expose(self, text):
         """
         Write windowed co-occurrence into the substrate.
@@ -342,7 +345,7 @@ class FlatMemory:
         self._dirty = True
         return n
 
-    #  adaptive recall
+    # ── adaptive recall ─────────────────────────────────────────────────────
     def _refresh_dirs(self):
         if not self._dirty and self._dirs is not None:
             return
@@ -384,7 +387,7 @@ class FlatMemory:
         self.sdm.consolidate()
         self._dirty = True
 
-    #  introspection
+    # ── introspection ───────────────────────────────────────────────────────
     @property
     def vocab_size(self):
         return len(self._seen)

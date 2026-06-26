@@ -1,8 +1,8 @@
 """
-ikigai.cognition.memory -- VSA associative memory primitives.
+ikigai.cognition.memory — VSA associative memory primitives.
 
 Houses:
-    TransitionMemory  -- Hebbian outer-product associative matrix
+    TransitionMemory  — Hebbian outer-product associative matrix
                         (Day 54 Pack 21, Rank 3 invention).
                         Stores (prev -> curr) transitions as a single 400x400
                         int32 matrix. Constant memory regardless of N records.
