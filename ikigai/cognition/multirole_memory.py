@@ -54,7 +54,12 @@ class MultiRoleMemory:
                      # token at position i in a sentence beginning with X is
                      # written as relate(X, f'pos_{i}', token_i).
                      'pos_0', 'pos_1', 'pos_2', 'pos_3',
-                     'pos_4', 'pos_5', 'pos_6', 'pos_7')
+                     'pos_4', 'pos_5', 'pos_6', 'pos_7',
+                     # Pack 331 -- the ASK role: a question cue token binds to
+                     # the relation that question is asking for (question ->
+                     # relation, the inverse of relation -> question template).
+                     # Learned from data; never hardcoded.
+                     'ask')
 
     def __init__(self, d=512, M=16384, k=64, seed=114, window=3, remove_r=1,
                  svd_sample=2000, roles=DEFAULT_ROLES, M_rel=8192,
@@ -331,8 +336,19 @@ class MultiRoleMemory:
         # role_targets stays -- "this word was associated with this role
         # at some point" is a separate fact from "target_word is the answer".
 
+    def ensure_role(self, name):
+        """Mint a phasor HV for `name` if the role doesn't exist yet, so new
+        relational channels (e.g. Pack 331 'ask') can be added at runtime on a
+        loaded organism without a re-init.  Idempotent."""
+        if name in self.roles:
+            return
+        rng = np.random.default_rng(self._init_seed + 999 + (abs(hash(name)) % 100000))
+        ph = rng.uniform(-np.pi, np.pi, self.d).astype(np.float32)
+        self.roles[name] = np.exp(1j * ph).astype(np.complex64)
+
     def relate(self, word, role, target_word):
         """word --role--> target_word  (stores the target's computed key)."""
+        self.ensure_role(role)
         self.write_relation(word, role, self.ck.key(target_word))
         self._role_targets.setdefault(role, set()).add(target_word)
 

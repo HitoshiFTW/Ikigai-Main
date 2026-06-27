@@ -1552,6 +1552,42 @@ class IkigaiOrganism:
                 web[r] = vals
         return web
 
+    @property
+    def ask_role(self):
+        """Pack 331 -- the interrogative 'ask' channel (question -> relation),
+        lazily attached. Learned, not hardcoded."""
+        ar = getattr(self, '_ask_role', None)
+        if ar is None:
+            from ikigai.cognition.ask_role import AskRole
+            ar = AskRole(self)
+            self._ask_role = ar
+        return ar
+
+    def learn_ask(self, stem, relation):
+        """Bind a question's cues to the relation it asks for (from data)."""
+        self.ask_role.learn(stem, relation)
+
+    def ask_relation(self, stem, candidates=None, top_k=3):
+        """Recall the relation(s) a natural-language question is asking for."""
+        return self.ask_role.predict(stem, candidates=candidates, top_k=top_k)
+
+    @property
+    def kg_reasoner(self):
+        """The multi-hop reasoning engine (comprehend -> derive -> calibrate)
+        over a knowledge graph. Lazily attached; load a KB via
+        kg_reasoner.load_triples(...) or kg_reasoner.set_adjacency(...)."""
+        r = getattr(self, '_kg_reasoner', None)
+        if r is None:
+            from ikigai.cognition.multihop_reasoner import MultiHopReasoner
+            r = MultiHopReasoner(self)
+            self._kg_reasoner = r
+        return r
+
+    def reason_mc(self, question, choices, concept=None):
+        """Answer a multiple-choice question by reliable multi-hop reasoning
+        over the loaded knowledge graph. Returns (label, confidence, abstain)."""
+        return self.kg_reasoner.answer_mc(question, choices, concept=concept)
+
     def read_passage(self, text):
         """Pack 302 v0 -- multi-token reading.  Parse a multi-sentence
         passage into atoms (sentence->fact, the inverse of the 300.1
