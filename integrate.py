@@ -1588,6 +1588,74 @@ class IkigaiOrganism:
         over the loaded knowledge graph. Returns (label, confidence, abstain)."""
         return self.kg_reasoner.answer_mc(question, choices, concept=concept)
 
+    @property
+    def holo_reader(self):
+        """Pack 333 -- the template-free holographic reader: read ANY sentence,
+        ask it back with a hole, the answer falls out by resonance. No templates,
+        no relation lists, no grammar -- pure FHRR bind/unbind over an SDM bank.
+        Lazily attached (its own reading memory, a body-part)."""
+        hr = getattr(self, '_holo_reader', None)
+        if hr is None:
+            from ikigai.cognition.holo_read import HolographicReader
+            hr = HolographicReader(d=512)
+            self._holo_reader = hr
+        return hr
+
+    def read_holo(self, text):
+        """Read a passage into the holographic reader (every token recoverable
+        from its context). Returns the number of writes."""
+        return self.holo_reader.read(text)
+
+    def answer_holo(self, sentence_with_hole, hole_token="_", top_k=1):
+        """Fill a blank in a sentence by holographic resonance over what has been
+        read. Honest-unknown below the substrate noise floor."""
+        return self.holo_reader.answer(sentence_with_hole, hole_token=hole_token,
+                                       top_k=top_k)
+
+    def ask_holo(self, question, top_k=1):
+        """Answer a plain-English question over what has been read -- no hole to
+        mark, no wh-list, no templates. Morphology + drop-unmatchable are native.
+        Honest-unknown below the noise floor."""
+        return self.holo_reader.ask(question, top_k=top_k)
+
+    def comprehend(self, text, min_rel_df=2):
+        """Read messy text -> EMERGENT (subj, rel, obj) atoms (relations learned
+        by recurrence, no templates/lists) -> ingest into the derive-not-store
+        engine so composites/multi-hop are DERIVED, never stored. The reader is
+        the episodic front door; the derive engine is the semantic store.
+        Returns the extracted triples."""
+        return self.holo_reader.comprehend(text, organism=self, min_rel_df=min_rel_df)
+
+    def ask_derive(self, question, depth=None):
+        """Answer a plain-English question through the SEMANTIC derive engine
+        (not the episodic holo store). Depth is EMERGENT by default: the question
+        is parsed into (entity, [relation_mentions]) and the hop count = the
+        number of mentions, read from the question -- no count passed. Each
+        relation is applied innermost-out. Pass `depth` to force a same-relation
+        chain of that length (for nested function-word chains the emergent parser
+        does not yet split). Returns (answer, entity, relation_or_mentions).
+        Derive-not-store -- the answer is computed from atoms."""
+        eng = self.general_reasoner.derive_engine
+        if depth is None:
+            ent, mentions = self.holo_reader.parse_chain(question)
+            if not (ent and mentions):
+                return None, ent, mentions
+            cur = ent
+            for rel in reversed(mentions):              # innermost-out
+                cur = eng.atom(rel, cur)
+                if not cur:
+                    return None, ent, mentions
+            return cur, ent, mentions
+        ent, rel = self.holo_reader.parse_question(question)
+        if not (ent and rel):
+            return None, ent, rel
+        cur = ent
+        for _ in range(max(1, depth)):
+            cur = eng.atom(rel, cur)
+            if not cur:
+                return None, ent, rel
+        return cur, ent, rel
+
     def read_passage(self, text):
         """Pack 302 v0 -- multi-token reading.  Parse a multi-sentence
         passage into atoms (sentence->fact, the inverse of the 300.1

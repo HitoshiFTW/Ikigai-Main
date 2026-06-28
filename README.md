@@ -120,6 +120,32 @@ boundary for honest abstention. Constant RAM regardless of data volume. CPU-only
 - **KG ingestion adapter** -- any `(subject, relation, object)` dump with
   arbitrary predicates ingests through one call. (`day81_pack326_ingest.py`)
 
+**Natural-language front end (template-free, no hardcoding)**
+
+A single module (`ikigai/cognition/holo_read.py`) reads plain English and answers
+plain English -- no templates, no relation/stopword/wh lists, no stemmer, no
+grammar rules. Pure FHRR bind/unbind over a Kanerva SDM, plus distributional
+statistics. It is the episodic front door; extracted atoms feed the
+derive-not-store engine (the reader never becomes the knowledge store).
+
+- **Template-free holographic reading** -- read any sentence, ask it back with a
+  hole, the answer falls out by resonance; honest-unknown when nothing resonates.
+  SDM-backed to 100% recall at N=2000. (`experiments/nl/day83_pack333c_module_gate.py`)
+- **Plain-English questions, morphology + reordering native** -- "who does X
+  report to" with `report`->`reports` for free; same-subject relations
+  disambiguated. (`experiments/nl/day83_pack333e_qreader.py`)
+- **Emergent atom extraction** -- relations learned by recurrence (no list); text
+  -> clean `(subject, relation, object)` -> multi-hop *derived*, not stored.
+  (`experiments/nl/day83_pack334_emergent_atoms.py`)
+- **Structural relation classifier** -- word-order (edges = arguments, interior =
+  relation) lifts mixed-relation prose from 20% to 100%.
+  (`experiments/nl/day83_pack337_prose_stress.py`)
+- **Reward-driven relation discovery (native dopamine-RL)** -- a rare relation
+  below the frequency floor is learned from reward: 0/2 -> 2/2, frequent relations
+  intact. (`experiments/nl/day83_pack338_rl_relation.py`)
+- **Multi-word entities + emergent question depth.**
+  (`experiments/nl/day83_pack336_multitoken.py`, `day83_pack339_emergent_depth.py`)
+
 **Biological / memory substrate**
 
 - **Zero catastrophic forgetting** -- 5 facts retained at 100% through 5,000+
