@@ -80,13 +80,20 @@ class IkigaiBeing:
                  drift_rate=0.05,
                  window_size=4,
                  attention_decay=0.9,
-                 birth_seed=42):
+                 birth_seed=42,
+                 key_fn=None):
         self.d                = int(d)
         self.drift_rate       = float(drift_rate)
         self.window_size      = int(window_size)
         self.attention_decay  = float(attention_decay)
         self._birth_seed      = int(birth_seed)
         self._rng             = np.random.default_rng(self._birth_seed)
+        # Day-83 audit MIGRATE (dictionary->HDC): word HVs are seeded from the
+        # SUBSTRATE's deterministic ComputedKey when key_fn is supplied, so
+        # being.lexicon shares ONE identity space with the unified substrate
+        # (was a separate random-phasor dict -- the duplication Prince flagged).
+        # Hebbian drift still rides on top; without key_fn falls back to random.
+        self._key_fn          = key_fn
 
         # Identity + age
         self.born_at          = time.time()
@@ -112,9 +119,17 @@ class IkigaiBeing:
     # ── core learning loop ────────────────────────────────────────────────
 
     def _ensure_word(self, w):
-        """Mint a new HV for first-seen word."""
+        """Mint a new HV for first-seen word. Seeded from the substrate's
+        ComputedKey (shared identity) when key_fn is set, else a random phasor."""
         if w not in self.lexicon:
-            self.lexicon[w] = _random_phasor(self.d, self._rng)
+            if self._key_fn is not None:
+                hv = np.asarray(self._key_fn(w), dtype=np.complex64).reshape(-1)
+                if hv.shape[0] == self.d:
+                    self.lexicon[w] = _renormalize_phasor(hv.copy())
+                else:                       # dim mismatch -> safe fallback
+                    self.lexicon[w] = _random_phasor(self.d, self._rng)
+            else:
+                self.lexicon[w] = _random_phasor(self.d, self._rng)
             self._word_counts[w] = 0
         self._word_counts[w] += 1
 

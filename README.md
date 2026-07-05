@@ -10,9 +10,14 @@ This repo is the working source of truth: the canonical organism (`ikigai.py`),
 the cognition stack (`ikigai/`), the public API (`integrate.py`), a one-command
 reproducible benchmark (`benchmark.py`), and runnable experiments for each claim.
 
-> Solo research prototype by Prince Siddhpara (17), Mura ALife Labs. There is no
-> published paper yet. Everything below is something you can run and check
-> yourself -- that is the point.
+> Solo research prototype by Prince Siddhpara (17), Mura ALife Labs. No published
+> paper yet, but the full three-month write-up (`NeuroSeed_3Month_Report.md`) and
+> the unedited daily logs (`daily_logs/`, Day 001 to Day 090) are in this repo.
+> Everything below is something you can run and check yourself -- that is the point.
+
+> **Runs on any PC.** `pip install -r requirements.txt` then `python benchmark.py`.
+> CPU only, no GPU, no pretrained body to download (the benchmark trains a fresh
+> organism live). Paths are module-relative; there is nothing machine-specific.
 
 ---
 
@@ -66,8 +71,12 @@ Same code path. On real ConceptNet this ingests ~100k commonsense edges into a
 - **CPU / on-device.** No GPU, no KV cache, no context window. The compute per
   query is decoupled from the size of what it knows.
 
-**What is *not* claimed:** a head-to-head win against a frontier LLM on a
-standard benchmark. That comparison is the next step, not a settled result. See
+**What is *not* claimed:** a broad win on world knowledge, or fluent long-form
+prose. The frontier ate the internet; on breadth and generation it wins, and this
+repo does not pretend otherwise. What *is* measured: on **equal-knowledge**
+multi-hop reasoning (both sides handed the same facts), the organism derives
+deeper without error at roughly one millionth the compute per query. See
+[Reasoning at near-zero compute](#reasoning-at-near-zero-compute) and
 [Honest limitations](#honest-limitations).
 
 ---
@@ -100,10 +109,33 @@ boundary for honest abstention. Constant RAM regardless of data volume. CPU-only
 | `ikigai/cognition/frame_relax.py` | Frame-then-fill generator (free-fluency, message-first). |
 | `ikigai/cognition/flat_memory.py` | The VSA-SDM substrate. |
 | `experiments/` | Runnable demos. Each prints `[PASS]/[FAIL]` per verification + a summary. |
+| `NeuroSeed_3Month_Report.md` | Three-month report (Day 1 to 90): goal, measured results, honest wins/losses, roadmap. |
+| `daily_logs/` | Full daily research logs, Day 001 to Day 090. The unedited trail. |
 
 ---
 
 ## Verified claims (each backed by a runnable experiment)
+
+### Reasoning at near-zero compute
+
+The headline result, and the one honest number on the board: on **equal-knowledge**
+multi-hop reasoning (both sides handed the same facts, exactly how ProofWriter /
+CLUTRR / bAbI are scored), the organism derives deeper without error, at roughly
+one millionth the compute of a frontier forward pass.
+
+- **Equal-knowledge multi-hop arena** -- 100% accuracy through 8 hops on 700
+  held-out *derived* facts (never stored), 0 fabrications, ~9 atom lookups and
+  ~9 nJ per query on one CPU core. The reasoning is done BY the substrate
+  (derive-chaining), not by the harness. (`experiments/nl/day88_arena.py`)
+- **Flat access, O(1) in store size** -- recall and chain latency stay flat as the
+  store grows 100x (10k -> 1M facts); a query touches its own atom and derivation
+  chain, never O(N). (`experiments/nl/day85_flat_access.py`)
+- **Faithful, verifiable answers** -- every answer carries a grounded `because`
+  chain that must re-derive and verify before it is emitted; unknown queries
+  abstain instead of confabulating. (`experiments/nl/day85_explained_answer.py`)
+- **Free-to-train scaling** -- ~15k facts/sec/core ingest with zero GPU and zero
+  gradient steps (~$0.36 per billion facts projected), flat lookups as the store
+  grows 100x. (`experiments/nl/day88_scaling.py`)
 
 **Reasoning / framework**
 
@@ -186,10 +218,11 @@ The benchmark's `--conceptnet` mode reads the ConceptNet 5.7 assertions dump
 This is a proof-of-concept, and it is more useful to you if I'm precise about
 the edges:
 
-- **Not yet benchmarked head-to-head against a frontier LLM** on a standard
-  public eval. The differentiators above (constant-RAM, no-forgetting,
-  calibrated abstention, derive-not-store) are demonstrated in isolation; a
-  clean comparison run is the next milestone.
+- **The comparison is equal-knowledge reasoning, not broad knowledge.** In a live
+  run against a 550B frontier model, accuracy tied on the hops the rate limit let
+  us test, and the organism won on compute by ~1e6x. On a standard *knowledge*
+  benchmark (where the frontier can draw on everything it absorbed) it would lose;
+  that is a data gap, not a reasoning gap, and we do not claim otherwise.
 - **Capacity per role is finite** at a given dimension (~20k facts/role at
   d=400 before recall degrades); scaling means raising the dimension or sharding.
 - **Fluent open-ended prose** is mechanism-complete but data-limited -- grammar

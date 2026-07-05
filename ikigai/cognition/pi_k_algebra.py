@@ -46,11 +46,16 @@ class PiK:
     """
 
     def __init__(self, d=2048, n_primes=32):
-        if d <= max(PRIMES_32[:n_primes]):
+        # Adapt n_primes to d: a roll offset >= d wraps to a degenerate/aliased
+        # permutation, so only primes < d are usable. Day-83 audit: this was a
+        # hard ValueError; now n_primes is capped to the primes that fit, so PiK
+        # works at any reasonable d (incl. the unified substrate d) -- no crash.
+        usable = [p for p in PRIMES_32[:n_primes] if p < int(d)]
+        if not usable:
             raise ValueError(
-                f'd={d} must exceed largest prime offset {max(PRIMES_32[:n_primes])}')
+                f'd={d} too small for any prime offset (min {PRIMES_32[0]})')
         self.d = int(d)
-        self.primes = PRIMES_32[:n_primes]
+        self.primes = usable
         self.n = len(self.primes)
 
     def pi(self, k, x):

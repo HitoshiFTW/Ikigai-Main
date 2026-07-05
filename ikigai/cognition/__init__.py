@@ -13,35 +13,13 @@ from ikigai.cognition.reasoning import (
     synthesize_composition,
     generate_composition_code,
 )
-from ikigai.cognition.code_gen import (
-    CodeIndex,
-    encode_function,
-    encode_query,
-    generate_function,
-    generate_with_verifier,
-    generate_with_index,
-    build_common_index,
-    rename_function,
-    compile_ok,
-    exec_and_test,
-)
-from ikigai.cognition.verifier import (
-    solve_greedy,
-    solve_verifier,
-    solve_chain,
-    verify_trajectory,
-    trajectory_hv,
-    extract_numbers,
-    extract_numbers_smart,
-    preprocess_relational,
-    _detect_final_op,
-)
-from ikigai.cognition.conversation import (
-    Conversation,
-    IntentRouter,
-    EpisodicBuffer,
-    build_conversation,
-)
+# code_gen REMOVED (audit batch 2, Day-83): HumanEval answer-bank (cheating) +
+# old bipolar paradigm; unwired. hot_loader (its only exec wrapper) removed too.
+# verifier REMOVED (audit trio, Day-83): deprecated GSM8K-tuned heuristic verifier
+# loop (OP_KEYWORDS/REGEX mined from training = benchmark-tuned); superseded by
+# RHC substrate math + SelfVerifier (self_verifier.py, a different kept module).
+# conversation REMOVED (audit batch 2, Day-83): deprecated corpus-kNN chatbot,
+# forbidden _safe_eval + hardcoded keyword lists; superseded by GeneralReasoner.
 from ikigai.cognition.phasor_state import (
     PhaseLockedHolographicBuffer,
     random_phasor, normalize_phase, bind as phasor_bind, unbind as phasor_unbind,
@@ -69,7 +47,8 @@ from ikigai.cognition.hebbian_tuner import HebbianVocabTuner
 from ikigai.cognition.ngram_expander import NGramExpander
 from ikigai.cognition.belief_expander import BeliefConditionedExpander
 from ikigai.cognition.skill_crystal import SkillCrystal
-from ikigai.cognition.multiresngram import MultiResNGram
+# multiresngram REMOVED (audit batch 1, Day-83): dead n-gram stack, superseded by
+# MultiRoleMemory.combined_ngram_candidates (Pack 136). Zero live importers.
 from ikigai.cognition.goal_decomposer import GoalDecomposer, PlanStep, ATOMIC_ACTIONS
 from ikigai.cognition.self_verifier import SelfVerifier
 from ikigai.cognition.world_model import SymbolicWorldModel
@@ -77,12 +56,15 @@ from ikigai.cognition.schema_inducer import SchemaInducer, anti_unify, apply_sch
 from ikigai.cognition.cross_modal_binder import CrossModalBinder
 from ikigai.cognition.schema_refiner import SchemaRefiner
 from ikigai.cognition.metacognitive_mirror import MetacognitiveHVMirror
-from ikigai.cognition.generation_pipeline import GenerationPipeline, RunResult
+# generation_pipeline REMOVED (audit batch 1, Day-83): dead Day-55 orchestrator,
+# superseded by frame_relax + derive path. Only importer was benchmark_runner (also dead).
 from ikigai.cognition.self_modifying_refiner import SelfModifyingRefiner, SelfModifyingSchema
-from ikigai.cognition.benchmark_runner import BenchmarkRunner, FrozenBaseline
+# benchmark_runner REMOVED (audit batch 1, Day-83): dead, imported generation_pipeline;
+# zero live importers (benchmark_harness_v2 is the live harness, untouched).
 from ikigai.cognition.substrate_adapter import SubstrateAdapter
 from ikigai.cognition.no_forgetting_proof import NoForgettingProof
-from ikigai.cognition.hot_loader import CognitionHotLoader
+# hot_loader REMOVED (audit batch 2, Day-83): exec-wrapper over code_gen's deleted
+# answer-bank templates; was instantiated but never used (self.hotload dead).
 from ikigai.cognition.holographic_memory import HolographicMemory, _encode_semantic
 from ikigai.cognition.vsa_calculus import VSACalculus
 from ikigai.cognition.belief_field import BeliefField
@@ -124,12 +106,6 @@ __all__ = [
     'WakeSleepCompressor',
     'RelationAlgebra', 'SemanticRoleMemory', 'EventSequenceMemory',
     'detect_pattern', 'compose', 'synthesize_composition', 'generate_composition_code',
-    'CodeIndex', 'encode_function', 'encode_query',
-    'generate_function', 'generate_with_verifier', 'generate_with_index',
-    'build_common_index', 'rename_function', 'compile_ok', 'exec_and_test',
-    'solve_greedy', 'solve_verifier', 'solve_chain', 'verify_trajectory',
-    'trajectory_hv', 'extract_numbers', 'extract_numbers_smart',
-    'Conversation', 'IntentRouter', 'EpisodicBuffer', 'build_conversation',
     'PhaseLockedHolographicBuffer',
     'random_phasor', 'normalize_phase',
     'phasor_bind', 'phasor_unbind', 'phasor_rotate', 'phasor_cosine', 'phasor_superpose',
@@ -143,7 +119,6 @@ __all__ = [
     'NGramExpander',
     'BeliefConditionedExpander',
     'SkillCrystal',
-    'MultiResNGram',
     'GoalDecomposer', 'PlanStep', 'ATOMIC_ACTIONS',
     'SelfVerifier',
     'SymbolicWorldModel',
@@ -151,12 +126,9 @@ __all__ = [
     'CrossModalBinder',
     'SchemaRefiner',
     'MetacognitiveHVMirror',
-    'GenerationPipeline', 'RunResult',
     'SelfModifyingRefiner', 'SelfModifyingSchema',
-    'BenchmarkRunner', 'FrozenBaseline',
     'SubstrateAdapter',
     'NoForgettingProof',
-    'CognitionHotLoader',
     'HolographicMemory',
     'VSACalculus',
     'BeliefField',

@@ -423,7 +423,13 @@ class GeneralReasoner:
                                         icl_action_token = cands[idx]
                 except Exception:
                     pass
-        # Goal-directed planning if goal provided + CWM has edges
+        # Goal-directed planning if goal provided + CWM has edges.
+        # Day 90 -- under _deep_dispatch, a request with NO explicit goal is
+        # UNDERSTOOD as a goal over world-model symbols (the states it mentions
+        # that the causal world model already knows), so the planner competes in
+        # the SAME argmin-F arbitration as derive / multihop -- the loop reaches
+        # for decomposition emergently, not via an authored 'if it abstained' fork.
+        # The explicit-goal path below is unchanged (pixel-safe when the flag is off).
         plan = None
         if goal is not None:
             try:
@@ -434,6 +440,14 @@ class GeneralReasoner:
                     max_depth=max_steps, beam_width=3)
             except Exception:
                 plan = None
+        elif getattr(self, '_deep_dispatch', False):
+            g_start, g_goal = self._derive_goal(toks)
+            if g_start is not None:
+                try:
+                    plan = self.planner.plan_with_backtrack(
+                        g_start, g_goal, max_depth=max_steps, branching=3)
+                except Exception:
+                    plan = None
         # Day 75 v8 method selection priority:
         #   1. Pack 254 RHC substrate_arith if arithmetic detected   'substrate_arith'
         #   2. cat-4 ICL if confident                                'b_self_icl'
@@ -447,16 +461,17 @@ class GeneralReasoner:
         try:
             from ikigai.cognition.math_eval import MathEval
             from ikigai.cognition.cat4_dopamine import is_compositional_query
-            # Pack 296: gate the arithmetic path with the Pack 283
-            # compositional classifier.  Without this, the word->magnitude
-            # operand recall fabricates a degenerate "add" on plain fact
-            # queries ("red planet" -> 12), eating them before active
-            # learning / cache.  Only engage arith on real arithmetic.
-            if is_compositional_query(text):
-                mev = getattr(self, '_math_eval', None)
-                if mev is None:
-                    mev = MathEval(self.org, engine='auto')
-                    self._math_eval = mev
+            # Pack 296: gate the arithmetic path with the compositional
+            # classifier.  Without this, the word->magnitude operand recall
+            # fabricates a degenerate "add" on plain fact queries ("red planet"
+            # -> 12), eating them before active learning / cache.  Day-83 audit:
+            # the gate is DE-HARDCODED -- op detection via the substrate's
+            # EMERGENT mev.is_operator (cat3.detect_operator), no op-word list.
+            mev = getattr(self, '_math_eval', None)
+            if mev is None:
+                mev = MathEval(self.org, engine='auto')
+                self._math_eval = mev
+            if is_compositional_query(text, op_detector=mev.is_operator):
                 a_pred, a_op, a_dbg = mev.substrate_arith(text)
                 if a_pred is not None and a_op is not None:
                     arith_pred = (a_pred, a_op, a_dbg)
@@ -496,7 +511,61 @@ class GeneralReasoner:
             from ikigai.cognition.calibration import abstain_boundary_n
             accept_sim = max(icl_min_state_sim,
                              abstain_boundary_n(self.d, n_action_vocab))
-        if arith_pred is not None:
+        if self._fe_dispatch:
+            # EMERGENT free-energy arbitration -- replaces the fixed if/elif order
+            # below with a scalar competition (argmin F).  Exacts dominate (F=0,
+            # registration order arith<derive<multihop<cache breaks ties); the
+            # eligibility gate (epistemic ask-teacher) and the geometric abstain
+            # boundary are preserved as principled EFE structure.
+            eligible = (do_active and not icl_exact_cache
+                        and self._active_learn_eligible(text))
+            exacts = []
+            if arith_pred is not None:
+                exacts.append(('substrate_arith', str(arith_pred[0]), 0.0))
+            if derive_ans is not None:
+                exacts.append((derive_ans[1], derive_ans[0], 0.0))
+            if multihop_ans is not None:
+                exacts.append((multihop_ans[1], multihop_ans[0], 0.0))
+            if icl_action_token is not None and icl_exact_cache:
+                exacts.append(('b_self_icl', icl_action_token, 0.0))
+            if exacts:
+                a, m = self._arbitrate(exacts)
+                if a is not None:
+                    answer, method = a, m
+            elif eligible:
+                learned = self._active_learn(text)
+                if learned:
+                    answer = learned
+                    icl_action_token = learned
+                    icl_top_sim = 1.0
+                    method = 'active_learn'
+                else:
+                    props = []
+                    if icl_action_token is not None and icl_top_sim >= accept_sim:
+                        props.append(('b_self_icl', icl_action_token,
+                                      self._free_energy(icl_top_sim)))
+                    a, m = self._arbitrate(props)
+                    if a is not None:
+                        answer, method = a, m
+                    elif next_pred:
+                        answer, method = next_pred[0][0], 'next_token'
+            else:
+                props = []
+                if icl_action_token is not None and icl_top_sim >= accept_sim:
+                    props.append(('b_self_icl', icl_action_token,
+                                  self._free_energy(icl_top_sim)))
+                if plan and plan.get('success'):
+                    props.append(('planner',
+                                  plan.get('actions') or plan.get('trajectory'),
+                                  self._F_PLANNER))
+                a, m = self._arbitrate(props)
+                if a is not None:
+                    answer, method = a, m
+                elif do_abstain and icl_top_sim < accept_sim:
+                    answer, method = 'unknown', 'abstain'
+                elif next_pred:
+                    answer, method = next_pred[0][0], 'next_token'
+        elif arith_pred is not None:
             answer = str(arith_pred[0])
             method = 'substrate_arith'
         elif derive_ans is not None:
@@ -577,15 +646,18 @@ class GeneralReasoner:
         the full method-selection order: arith -> derive -> multihop ->
         exact cache.  Never asks the teacher (that stays on the slow,
         uncertain path)."""
+        if getattr(self, '_fe_dispatch', False):
+            # emergent free-energy arbitration over the same exact proposals
+            return self._fast_answer_fe(text, toks, goal, do_multihop, do_derive)
         # 1. arithmetic (gated by the Pack 283 compositional classifier)
         try:
             from ikigai.cognition.cat4_dopamine import is_compositional_query
-            if is_compositional_query(text):
-                from ikigai.cognition.math_eval import MathEval
-                mev = getattr(self, '_math_eval', None)
-                if mev is None:
-                    mev = MathEval(self.org, engine='auto')
-                    self._math_eval = mev
+            from ikigai.cognition.math_eval import MathEval
+            mev = getattr(self, '_math_eval', None)
+            if mev is None:
+                mev = MathEval(self.org, engine='auto')
+                self._math_eval = mev
+            if is_compositional_query(text, op_detector=mev.is_operator):
                 a_pred, a_op, _ = mev.substrate_arith(text)
                 if a_pred is not None and a_op is not None:
                     return self._fast_result(toks, str(a_pred),
@@ -625,6 +697,116 @@ class GeneralReasoner:
         except Exception:
             pass
         return None
+
+    def _fast_answer_fe(self, text, toks, goal=None, do_multihop=True,
+                         do_derive=True):
+        """Emergent-dispatch twin of _fast_answer: compute the SAME four exact
+        proposals (arith / derive / multihop / exact-cache), then pick argmin
+        free energy (all exact = F 0.0; stable sort keeps arith<derive<multihop
+        <cache tie-break, so a lone hit is identical to the ladder's first-hit).
+        Returns a result dict or None."""
+        props = []   # (method, answer, F, icl, exact)
+        try:
+            from ikigai.cognition.cat4_dopamine import is_compositional_query
+            from ikigai.cognition.math_eval import MathEval
+            mev = getattr(self, '_math_eval', None)
+            if mev is None:
+                mev = MathEval(self.org, engine='auto')
+                self._math_eval = mev
+            if is_compositional_query(text, op_detector=mev.is_operator):
+                a_pred, a_op, _ = mev.substrate_arith(text)
+                if a_pred is not None and a_op is not None:
+                    props.append(('substrate_arith', str(a_pred), 0.0, None, False))
+        except Exception:
+            pass
+        if do_derive:
+            try:
+                d = self.derive_engine.derive(text)
+                if d is not None:
+                    props.append((d[1], d[0], 0.0, d[0], False))
+            except Exception:
+                pass
+        if do_multihop:
+            try:
+                mh = self._reason_multihop(text)
+                if mh is not None:
+                    props.append((mh[1], mh[0], 0.0, None, False))
+            except Exception:
+                pass
+        try:
+            cat4 = (getattr(self.org, '_cat4', None)
+                    or getattr(self.org, 'cat4', None))
+            if cat4 is not None and getattr(cat4, 'anchor_actions', None):
+                from ikigai.cognition.cat4_absorb import _stable_anchor
+                entry = cat4.anchor_actions.get(_stable_anchor(toks))
+                if entry:
+                    chosen = entry[-1]
+                    ans = (' '.join(chosen)
+                           if isinstance(chosen, (list, tuple)) else str(chosen))
+                    if ans:
+                        props.append(('b_self_icl', ans, 0.0, ans, True))
+        except Exception:
+            pass
+        if not props:
+            return None
+        props.sort(key=lambda p: p[2])
+        m, a, _f, icl, ex = props[0]
+        return self._fast_result(toks, a, m, icl=icl, exact=ex)
+
+    # ---- Day 89: EMERGENT free-energy dispatch ----------------------------
+    # Replaces the hand-authored if/elif PRIORITY LADDER (which method fires,
+    # in a fixed typed order) with a uniform SCALAR competition: every path
+    # proposes an answer with a free energy F = -log(confidence) (surprise);
+    # the organism picks argmin F.  Exact paths (arith/derive/multihop/exact
+    # -cache) are F=0 and dominate; a soft recall competes at F=-log(sim) but
+    # only above the calibrated acceptance boundary; a new capability just
+    # registers a proposer -- no ladder to edit, no mode to hardcode.  The
+    # eligibility gate (epistemic 'ask the teacher' vs pragmatic answer) and
+    # the geometric abstain boundary are preserved -- both are principled EFE
+    # structure, not arbitrary priority.  Gated by _fe_dispatch; proven pixel
+    # -identical to the ladder before it becomes default.
+    _fe_dispatch = True      # Day-89: emergent arbitration is DEFAULT (pixel-gated).
+    _deep_dispatch = True    # Day-90: understand a goal-request -> plan competes in
+                             # the SAME arbitration.  DEFAULT after pixel proof
+                             # (day90_dispatch_pixel: 0 diffs on 36 production queries).
+    _F_PLANNER = 10.0        # ranks below any accepted soft recall, above nothing
+    _F_NEXT = 20.0
+
+    def _derive_goal(self, toks):
+        """Day 90 -- understand a request as a GOAL over the world model: the
+        symbols it mentions that the causal world model ALREADY knows as states.
+        Positional (first known state = start, last = goal); generic -- no per-
+        request rule and no curated token list, the same discipline as the derive
+        parser.  Returns (start, goal) state names, or (None, None) when the request
+        names fewer than two known states (then no plan is proposed and the arbiter
+        arbitrates exactly as before).  Reads the arbiter's OWN causal world model
+        (built lazily; None until something populates it -> deep dispatch is inert)."""
+        cwm = getattr(self, '_cwm', None)
+        states = getattr(cwm, '_states', None) if cwm is not None else None
+        if not states:
+            return None, None
+        seen, known = set(), []
+        for t in toks:
+            if t in states and t not in seen:
+                seen.add(t); known.append(t)
+        if len(known) >= 2 and known[0] != known[-1]:
+            return known[0], known[-1]
+        return None, None
+
+    @staticmethod
+    def _free_energy(conf):
+        import math
+        c = max(1e-9, min(1.0, float(conf)))
+        return -math.log(c)
+
+    def _arbitrate(self, proposals):
+        """proposals: list of (method, answer, free_energy).  Pick argmin F; stable
+        sort so equal-F (exact) proposals keep registration order.  Returns
+        (answer, method) or (None, None) if nothing proposed."""
+        if not proposals:
+            return None, None
+        best = sorted(proposals, key=lambda p: p[2])[0]
+        return best[1], best[0]
 
     # Pack 293 -- multi-hop question templates.  Specific by design so
     # false positives are near zero; anything else skips the multi-hop
@@ -737,7 +919,12 @@ class GeneralReasoner:
             return False
         try:
             from ikigai.cognition.cat4_dopamine import is_atomic_query
-            if not is_atomic_query(text):     # skip math / compositional
+            from ikigai.cognition.math_eval import MathEval
+            mev = getattr(self, '_math_eval', None)
+            if mev is None:
+                mev = MathEval(self.org, engine='auto')
+                self._math_eval = mev
+            if not is_atomic_query(text, op_detector=mev.is_operator):  # skip math
                 return False
         except Exception:
             pass

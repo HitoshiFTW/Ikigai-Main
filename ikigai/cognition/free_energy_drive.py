@@ -114,20 +114,48 @@ class ConversationalVariationalFreeEnergyField:
 
     # ─── action selection ──────────────────────────────────────────
 
+    # Action -> the free-energy COMPONENT it acts on. Structural map (like a
+    # role schema), not authored content: each conversational move targets the
+    # signal it is designed to reduce.
+    _ACTION_TARGET = {
+        'clarify':   'gap',     # close the comprehension gap
+        'redirect':  'gap',     # leave an unproductive gap
+        'challenge': 'con',     # surface / resolve a contradiction
+        'summarize': 'kl',      # consolidate a large belief shift
+        'volunteer': 'kl',      # add information when surprise drove the shift
+        'respond':   'F',       # general progress against total F
+        'terminate': 'zero',    # attractive only when F is already ~0
+    }
+
     def expected_free_energy(self, action, F=None):
+        """Expected free energy AFTER taking `action` (active inference: the
+        policy is argmin_a EFE). Day-83 audit fix: the old form _EF_COEFF[a]*F
+        was DEGENERATE -- F is a scalar, so argmin over coeff*F always returned
+        the smallest-coeff action ('terminate') regardless of state. Now each
+        action reduces the F COMPONENT it targets by its efficacy (_EF_COEFF),
+        and EFE = the residual F. State-dependent + math-grounded."""
         if F is None:
             F = self.free_energy()
-        return _EF_COEFF[action] * F
+        comps = {
+            'gap':  self.w_g * self.gap_score(),
+            'con':  self.w_k * self.contradiction_score(),
+            'kl':   self.kl_surprise(),
+            'F':    F,
+            'zero': 0.0,
+        }
+        target = comps[self._ACTION_TARGET.get(action, 'F')]
+        reduction = _EF_COEFF[action] * target
+        return float(max(F - reduction, 0.0))
 
     def select_action(self):
         F = self.free_energy()
-        best = min(ACTIONS, key=lambda a: _EF_COEFF[a] * F)
+        best = min(ACTIONS, key=lambda a: self.expected_free_energy(a, F))
         self.action_log.append(best)
         return best
 
     def action_distribution(self):
         F = self.free_energy()
-        return {a: _EF_COEFF[a] * F for a in ACTIONS}
+        return {a: self.expected_free_energy(a, F) for a in ACTIONS}
 
     # ─── state update ─────────────────────────────────────────────
 

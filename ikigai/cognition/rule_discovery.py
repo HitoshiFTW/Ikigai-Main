@@ -41,7 +41,8 @@ class RuleMiner:
     # ---- inheritance: r(link(x)) == r(x) ----------------------------
 
     def mine_inheritance(self, entities, link_rels, attr_rels,
-                          min_support=10, min_conf=0.9, verbose=False):
+                          min_support=10, min_conf=0.9, verbose=False,
+                          subj_of=None):
         """For each (link_rel, attr_rel), test whether the value of
         attr_rel on link_rel(x) equals attr_rel on x across `entities`.
 
@@ -59,7 +60,8 @@ class RuleMiner:
                     continue
                 self.stats['candidates'] += 1
                 support = match = 0
-                for x in entities:
+                xs = subj_of.get(link, entities) if subj_of else entities
+                for x in xs:
                     link_val = self.eng.atom(link, x)
                     if not link_val:
                         continue
@@ -84,7 +86,8 @@ class RuleMiner:
 
     # ---- synonymy: r_a(x) == r_b(x) ---------------------------------
 
-    def mine_synonymy(self, entities, rels, min_support=10, min_conf=0.95):
+    def mine_synonymy(self, entities, rels, min_support=10, min_conf=0.95,
+                      subj_of=None):
         """Test whether two relations carry the same value on every
         entity (e.g. 'continent' and 'region' taught identically)."""
         rules = []
@@ -94,7 +97,11 @@ class RuleMiner:
                 ra, rb = rels[i], rels[j]
                 self.stats['candidates'] += 1
                 support = match = 0
-                for x in entities:
+                if subj_of:
+                    xs = subj_of.get(ra, set()) & subj_of.get(rb, set())
+                else:
+                    xs = entities
+                for x in xs:
                     va = self.eng.atom(ra, x)
                     vb = self.eng.atom(rb, x)
                     if va is None or vb is None:
@@ -113,7 +120,7 @@ class RuleMiner:
     # ---- inverse: r_inv(r(x)) == x  (round-trip) --------------------
 
     def mine_inverse(self, entities, rels, min_support=6, min_conf=0.85,
-                     verbose=False):
+                     verbose=False, subj_of=None):
         """Discover round-trip pairs: r_inv(r(x)) == x.  e.g. capital maps
         country->city and country_of maps city->country, so for every
         country x: country_of(capital(x)) == x.  Enables deriving one
@@ -126,7 +133,8 @@ class RuleMiner:
                     continue
                 self.stats['candidates'] += 1
                 support = match = 0
-                for x in entities:
+                xs = subj_of.get(r, entities) if subj_of else entities
+                for x in xs:
                     mid = self.eng.atom(r, x)
                     if not mid:
                         continue
@@ -148,7 +156,7 @@ class RuleMiner:
     # ---- transitive: R(a)=b & R(b)=c  =>  R chains (a..c) -----------
 
     def mine_transitive(self, entities, link_rels, min_support=3,
-                        min_conf=0.9, verbose=False):
+                        min_conf=0.9, verbose=False, subj_of=None):
         """Pack 317.2 -- discover TRANSITIVE link relations: R where R(a)=b
         and R(b)=c both hold (b is itself a subject of R), acyclically, for
         >= min_support entities.  Promotes {'type':'transitive','rel':R}.
@@ -162,7 +170,8 @@ class RuleMiner:
         for R in link_rels:
             self.stats['candidates'] += 1
             chains = acyclic = 0
-            for a in entities:
+            xs = subj_of.get(R, entities) if subj_of else entities
+            for a in xs:
                 b = self.eng.atom(R, a)
                 if not b:
                     continue
@@ -205,17 +214,58 @@ class RuleMiner:
 
     # ---- full pass --------------------------------------------------
 
+    def _subject_index(self, relations):
+        """subj_of[r] = set of subjects that actually carry relation r.
+        Built once from the stored triples so the pair-miners iterate only the
+        entities that HAVE the relation (and, for a pair, their intersection)
+        instead of every entity in the store.  Turns the O(rels^2 * |entities|)
+        scan into O(rels^2 * mean_subjects) -- the difference between minutes
+        and milliseconds at Wikidata scale, where almost every entity carries
+        almost none of the relations."""
+        want = set(relations)
+        idx = {r: set() for r in want}
+        for key in self.eng.triples:
+            if isinstance(key, tuple) and len(key) == 2:
+                s, r = key
+                bucket = idx.get(r)
+                if bucket is not None:
+                    bucket.add(s)
+        return idx
+
     def mine_all(self, entities, link_rels, attr_rels,
-                 min_support=10, min_conf=0.9, verbose=False):
+                 min_support=10, min_conf=0.9, verbose=False,
+                 pair_budget=30_000_000, inh_budget=200_000_000):
         rules = []
-        rules += self.mine_inheritance(entities, link_rels, attr_rels,
-                                       min_support, min_conf, verbose=verbose)
-        rules += self.mine_synonymy(entities, attr_rels,
-                                    min_support, max(min_conf, 0.95))
-        rules += self.mine_inverse(entities, link_rels + attr_rels,
-                                   min_support, max(min_conf, 0.85),
-                                   verbose=verbose)
+        subj_of = self._subject_index(set(link_rels) | set(attr_rels))
+        n_rel = len(link_rels) + len(attr_rels)
+        n_fact = sum(len(v) for v in subj_of.values())
+        mean_subj = n_fact // max(1, n_rel)
+        # Transitive is O(n_fact) and feeds the closure count -- always run it.
         rules += self.mine_transitive(entities, link_rels,
                                       max(3, min_support // 3),
-                                      max(min_conf, 0.9), verbose=verbose)
+                                      max(min_conf, 0.9), verbose=verbose,
+                                      subj_of=subj_of)
+        # Inheritance is the sub-MB compression lever (one attr on a class serves
+        # every descendant) and, with the subject index, costs only
+        # ~ n_link * n_attr * mean_subjects -- cheap, NOT quadratic in relations.
+        # Keep it on its own (larger) budget so a dense taxonomy always mines it.
+        inh_cost = max(1, len(link_rels)) * max(1, len(attr_rels)) * max(1, mean_subj)
+        if inh_cost <= inh_budget:
+            rules += self.mine_inheritance(entities, link_rels, attr_rels,
+                                           min_support, min_conf,
+                                           verbose=verbose, subj_of=subj_of)
+        elif verbose:
+            print(f'    [mine] inh_cost {inh_cost:,} > {inh_budget:,} -- skip inheritance')
+        # Synonymy + inverse are the genuinely quadratic pair-miners (inverse
+        # cannot intersect subject sets); gate them on the tighter budget.
+        pair_cost = n_rel * max(1, n_fact)
+        if pair_cost <= pair_budget:
+            rules += self.mine_synonymy(entities, attr_rels,
+                                        min_support, max(min_conf, 0.95),
+                                        subj_of=subj_of)
+            rules += self.mine_inverse(entities, link_rels + attr_rels,
+                                       min_support, max(min_conf, 0.85),
+                                       verbose=verbose, subj_of=subj_of)
+        elif verbose:
+            print(f'    [mine] pair_cost {pair_cost:,} > {pair_budget:,} -- skip synonymy/inverse')
         return rules

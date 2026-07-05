@@ -174,10 +174,22 @@ class BeliefField:
         consensus = np.sign(a + b + noise).astype(np.float32)
         consensus[consensus == 0.0] = 1.0
 
-        a_new = np.sign(a + self.heal_rate * consensus).astype(np.float32)
-        b_new = np.sign(b + self.heal_rate * consensus).astype(np.float32)
-        a_new[a_new == 0.0] = 1.0
-        b_new[b_new == 0.0] = 1.0
+        # Move both toward consensus by flipping a heal_rate-fraction of the
+        # positions where each disagrees with consensus (Day-83 audit fix: the
+        # old sign(x + heal_rate*consensus) was a NO-OP for bipolar +-1 HVs at
+        # heal_rate<=1 -- a +-1 sign cannot be flipped by a <=1 nudge, so heal
+        # never moved at the default rate 0.5. Flip-fraction is monotonic and
+        # keeps the gradual-heal semantics; rate>=1 fully heals in one step.)
+        def _toward(x, c, rate):
+            x = x.astype(np.float32); out = x.copy()
+            mis = np.where(np.sign(x) != np.sign(c))[0]
+            if len(mis):
+                k = max(1, int(round(float(rate) * len(mis))))
+                out[mis[:k]] = np.sign(c[mis[:k]])
+            out[out == 0.0] = 1.0
+            return out
+        a_new = _toward(a, consensus, self.heal_rate)
+        b_new = _toward(b, consensus, self.heal_rate)
 
         self._beliefs[name_a] = a_new * self._polarities[name_a]
         self._beliefs[name_b] = b_new * self._polarities[name_b]

@@ -319,6 +319,76 @@ class HolographicReader:
         entity = " ".join(min(spans, key=lambda s: sum(self.df[w] for w in s)))
         return entity, [" ".join(m) for m in mentions]
 
+    def parse_for_engine(self, question, relations, entity_set,
+                         rel_thresh=0.30, strong=0.45, margin=1.5, max_span=4):
+        """Bridge a plain-English question onto a DERIVE-ENGINE's OWN vocabulary
+        (its relations + entities), for data ingested straight into the engine --
+        where the reader never read the text, so its episodic df/vocab are empty
+        and parse_chain finds nothing.  Reuses the SAME trigram morphology as
+        `_match`: a question token is a RELATION when it is an exact engine
+        relation, or its nearest engine relation by morphology clears a
+        vocab-appropriate threshold by a clear margin -- so 'is'->'isa',
+        'subclass'->'subclassof', with no wh-list, no relation table, no copula
+        default.  The ENTITY is the longest contiguous question span that is an
+        actual engine entity; tokens that are neither relation nor part of a known
+        entity ('what') drop themselves, exactly as in the episodic parser.
+        Returns (entity, [relation_mentions]) in text order -- apply innermost-out,
+        identical contract to parse_chain.  No hardcoding; native morphology."""
+        relset = set(relations)
+        rels = list(relset)
+        if not rels:
+            return None, []
+        M = np.stack([self.morph.key(r) for r in rels])     # |rels| x d
+        toks = _tokens(question)
+        # label each token: a relation name (+ match strength), or 'arg'
+        kinds = []
+        for t in toks:
+            if t in relset:
+                kinds.append(['rel', t, 1.0]); continue
+            sims = np.abs(M @ np.conj(self.morph.key(t))) / self.d
+            i = int(np.argmax(sims)); best = float(sims[i])
+            second = float(np.partition(sims, -2)[-2]) if len(sims) > 1 else 0.0
+            if best >= rel_thresh and best >= margin * max(second, 1e-9):
+                kinds.append(['rel', rels[i], best])
+            else:
+                kinds.append(['arg', t, 0.0])
+        # copula disambiguation, native: a borderline relation match ('is'->isa
+        # at ~0.33) that co-occurs with a CONFIDENT one ('subclass'->subclassof
+        # at ~0.68) is filler -- drop the weak one so the strong relation owns the
+        # hop.  The morphology confidence itself separates copula from relation;
+        # no stopword list.
+        if any(k[0] == 'rel' and k[2] >= strong for k in kinds):
+            kinds = [k for k in kinds if not (k[0] == 'rel' and k[2] < strong)]
+        # group consecutive labels: relation runs -> mentions, arg runs -> spans
+        mentions, span_runs, run, cur = [], [], [], []
+        for kind, val, _str in kinds:
+            if kind == 'rel':
+                run.append(val)
+                if cur:
+                    span_runs.append(cur); cur = []
+            else:
+                cur.append(val)
+                if run:
+                    mentions.append(" ".join(run)); run = []
+        if run:
+            mentions.append(" ".join(run))
+        if cur:
+            span_runs.append(cur)
+        # entity = longest contiguous sub-span of any arg run that is a real
+        # engine entity (multi-word 'mount vesuvius' over single 'what'); else the
+        # longest arg run joined (honest best guess).
+        best_ent, best_len = None, 0
+        for words in span_runs:
+            n = len(words)
+            for L in range(min(max_span, n), 0, -1):
+                for s in range(0, n - L + 1):
+                    cand = " ".join(words[s:s + L])
+                    if cand in entity_set and L > best_len:
+                        best_ent, best_len = cand, L
+        if best_ent is None and span_runs:
+            best_ent = " ".join(max(span_runs, key=len))
+        return best_ent, mentions
+
     def reinforce(self, subject, gold, reward=2.0):
         """Native dopamine-RL for relation discovery. A quiz gives (subject ->
         gold) but the parse missed -- the connecting tokens were mis-classified

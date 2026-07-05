@@ -133,6 +133,21 @@ class FreeEnergyActionSelector:
 
     # ── selection ─────────────────────────────────────────────────────────
 
+    @staticmethod
+    def select_from_values(candidates, lam=0.4):
+        """Day-88 -- EFE selection from REAL substrate-computed values instead of
+        the toy-HV cosines above.  `candidates` = [(name, epistemic, pragmatic)],
+        where the caller computes epistemic (expected information gain) and
+        pragmatic (goal/purpose alignment) from the actual organism state.
+
+        Expected free energy  EFE = -pragmatic - lam * epistemic  (lower = better),
+        exactly the two-term tradeoff of the Friston objective (exploit + explore).
+        Returns [(name, efe, epistemic, pragmatic)] ascending EFE (best first)."""
+        res = [(n, -float(prag) - lam * float(epi), float(epi), float(prag))
+               for (n, epi, prag) in candidates]
+        res.sort(key=lambda x: x[1])
+        return res
+
     def select(self, goal_tokens, belief_field_hv=None, lam=0.3, top_k=1):
         """Returns [(action_name, fe), ...] ascending FE (best first)."""
         results = []

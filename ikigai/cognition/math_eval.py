@@ -142,6 +142,20 @@ class MathEval:
             return None, None
         return np.asarray(hv, dtype=np.complex64), parse_number(best_tok)
 
+    def is_operator(self, tok):
+        """Day-83 audit DE-HARDCODE helper: True iff the substrate's EMERGENT
+        operator detector (Cat3Absorb.detect_operator -- LEARNED from a*b==c
+        chains, no authored lexicon) recognises `tok` as an arithmetic operator.
+        Lets general_reasoner gate the arith path WITHOUT a hardcoded op-word
+        frozenset. Returns False when the substrate has no operator signal."""
+        cat3 = getattr(self.org, '_cat3', None) or self.cat3
+        if cat3 is None or not hasattr(cat3, 'detect_operator'):
+            return False
+        try:
+            return cat3.detect_operator(tok) is not None
+        except Exception:
+            return False
+
     def substrate_arith(self, problem):
         """Parse problem into (left, op, right). Apply substrate math.
         Returns (predicted_int, op_label, debug).

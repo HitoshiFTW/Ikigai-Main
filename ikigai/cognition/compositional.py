@@ -195,6 +195,14 @@ class CompositionEngine:
         if cat4 is None or not getattr(cat4, 'anchor_actions', None):
             return None
         ent = str(entity).strip().lower()
+        # Day-87 -- counterfactual intervention: a temporarily installed override
+        # replaces one atom so the SAME derive-chaining flows over the intervened
+        # world (do-operator on the substrate).  Read-only; removed after measuring.
+        ov = getattr(self, '_cf_override', None)
+        if ov:
+            hit = ov.get((ent, str(rel).strip().lower()))
+            if hit is not None:
+                return hit
         for tmpl in templates:
             q = tmpl.format(e=ent)
             toks = self.gr.tokenize(q)
@@ -329,6 +337,445 @@ class CompositionEngine:
             return None
         t = str(target).strip().lower()
         return t in chain[1:]
+
+    def inherited_atom(self, attr, entity):
+        """Pack 350 -- attribute inheritance DOWN a taxonomy, derive-not-store.
+        Resolve attr(entity) when it is not stored on the entity itself by
+        climbing a TRANSITIVE inheritance link (e.g. subclassof) to the nearest
+        ancestor that does carry the attribute -- so an attribute stored ONCE on
+        a class is answered for every one of its (transitive) descendants without
+        storing a single descendant copy.  This is the deep multiplier the
+        comparison count masks: one `warm_blooded(mammal)` serves every mammal.
+
+        Read-only.  Falls back to the direct atom; returns None when neither the
+        entity nor any sanctioned ancestor carries the attribute.  Exceptions are
+        honoured automatically -- a descendant with its OWN stored value shadows
+        the inherited one (the direct lookup wins)."""
+        attr = self._norm_rel(attr)
+        direct = self.atom(attr, entity)
+        if direct:
+            return direct
+        # every transitive link over which attr inherits (isa, subclassof, ...)
+        links = []
+        for r in self.learned_rules:
+            if r.get('type') != 'inheritance':
+                continue
+            if not (r.get('attr') == '*' or self._norm_rel(r.get('attr')) == attr):
+                continue
+            link = r.get('link')
+            if link not in links:
+                links.append(link)     # an inheritance rule sanctions climbing its link
+        if not links:
+            return None
+        # climb the taxonomy up ALL of them together -- a real hierarchy mixes
+        # instance-of and subclass-of, so a breadth-first climb over every
+        # inheritance link reaches the nearest ancestor that defines attr, even
+        # across mixed hops (vanadium -isa-> metal -subclassof-> material).
+        entity = str(entity).strip().lower()
+        seen, frontier = {entity}, [entity]
+        while frontier:
+            nxt = []
+            for x in frontier:
+                for link in links:
+                    anc = self.atom(link, x)
+                    if anc and anc not in seen:
+                        v = self.atom(attr, anc)
+                        if v:
+                            return v
+                        seen.add(anc); nxt.append(anc)
+            frontier = nxt
+        return None
+
+    def entity_signature(self, entity):
+        """Day-85 -- the SUBSTRATE signature of an entity: a single holographic
+        vector bundling bind(key(relation), key(value)) over every fact stored
+        about it.  This is what the entity IS, in the phasor algebra -- the
+        object concept-invention reasons over.  Returns (sig_hv, props, n)."""
+        from ikigai.cognition.phasor_state import bind
+        ck = self.gr.org.unified.ck
+        e = str(entity).strip().lower()
+        sig, props = None, []
+        for (s, r), v in self.triples.items():
+            if s == e and v:
+                b = bind(ck.key(r), ck.key(v))
+                sig = b if sig is None else sig + b
+                props.append((r, v))
+        return sig, props, len(props)
+
+    def reverse_reach(self, target, rels=None):
+        """Day-86 -- REVERSE derivation: every entity that reaches `target`
+        through the given relations, derived NOT stored -- the inverse of a
+        forward query.  'what things ARE a metal' = every isa / subclass
+        descendant of metal, found by a reverse breadth-first walk up the edges,
+        the closure computed on demand and never materialised.  Defaults to the
+        taxonomic links (learned-transitive relations plus 'isa').  Returns the
+        descendant entities in discovery order."""
+        target = str(target).strip().lower()
+        if rels is None:
+            # taxonomic LINK relations (values are themselves entities) -- isa,
+            # subclassof and the like -- detected structurally, so the reverse
+            # closure follows the class hierarchy even where the transitive RULE
+            # was not mined (too few chains), while attribute relations (leaf
+            # values, e.g. 'capital') are excluded.
+            from ikigai.cognition.rule_discovery import RuleMiner
+            link, _attr = RuleMiner.classify_relations(
+                self.triples, self.relations, self.entities)
+            rels = set(link)
+        rels = set(rels)
+        children = {}                              # value -> [subjects] over these rels
+        for (s, r), v in self.triples.items():
+            if r in rels and v:
+                children.setdefault(v, []).append(s)
+        seen, out, frontier = set(), [], [target]
+        while frontier:
+            nxt = []
+            for t in frontier:
+                for s in children.get(t, []):
+                    if s not in seen:
+                        seen.add(s); out.append(s); nxt.append(s)
+            frontier = nxt
+        return out
+
+    def _cleanup(self, vec, candidates):
+        """Resonance read-out: return the codebook token whose key best matches
+        `vec` by cosine (the VSA cleanup step), with its score.  This is the
+        geometric decision a superposition read REQUIRES -- not a python test
+        over stored values."""
+        from ikigai.cognition.phasor_state import cosine
+        ck = self.gr.org.unified.ck
+        best, bs = None, -1.0
+        for c in candidates:
+            s = cosine(vec, ck.key(c))
+            if s > bs:
+                best, bs = c, s
+        return best, bs
+
+    def analogy(self, a, b, c):
+        """Day-86 GOLD -- A:B :: C:? by PURE SUBSTRATE ALGEBRA.  Recover the
+        relation linking A->B by UNBINDING it out of A's holographic signature
+        and cleaning up over the relation vocabulary (the relation is read by
+        resonance, never scanned), then APPLY that relation to C the same way --
+        unbind it out of C's signature and clean up over the value vocabulary.
+        No relation list, no dict search: bind/unbind/cleanup only.  Faithful --
+        the (relation, answer) is verified against the store when present.
+        Returns (answer, relation, score, verified)."""
+        from ikigai.cognition.phasor_state import unbind
+        ck = self.gr.org.unified.ck
+        sa, _pa, _na = self.entity_signature(a)
+        sc, _pc, _nc = self.entity_signature(c)
+        if sa is None or sc is None:
+            return None, None, 0.0, False
+        rel, _rs = self._cleanup(unbind(sa, ck.key(str(b).strip().lower())),
+                                 list(self.relations))
+        if rel is None:
+            return None, None, 0.0, False
+        objs = {v for (_s, _r), v in self.triples.items() if v}
+        ans, ascore = self._cleanup(unbind(sc, ck.key(rel)), objs)
+        verified = (self.atom(rel, c) == ans) if ans else False
+        return ans, rel, round(float(ascore), 3), bool(verified)
+
+    def dream_discover(self, max_deductive=8, max_analogical=6,
+                       resonance_thresh=0.45, seed=None, max_scan=500):
+        """Day-87 GOLD -- CREATIVE SLEEP.  Unprompted, the organism recombines
+        what it knows and WAKES KNOWING things nobody told it -- two honestly
+        separated ways, both pure substrate work:
+
+        (1) DEDUCTIVE dreaming (proven true).  It spontaneously chases its own
+        learned closures -- transitive links and attribute inheritance -- and
+        surfaces facts that are ENTAILED by its rules but were never directly
+        stored or queried (platinum -> metal -> material; a mammal's warm blood
+        inherited onto a whale it was never told about).  Each is re-derived and
+        VERIFIED before it is reported, so a discovery is a proof, not a guess --
+        derive-chaining, the sanctioned forward reach, run of the organism's own
+        accord instead of on demand.  These are TRUE; they are not stored (the
+        closure is free to re-derive -- that IS the multiplier).
+
+        (2) ANALOGICAL dreaming (a conjecture).  It picks an entity, finds the
+        peer whose holographic SIGNATURE most RESONATES with its own (the same
+        entity_signature bundle + cosine that concept invention and analogy use --
+        a geometric decision, not a dict scan), and transfers a property the peer
+        has and it lacks: most things this shape have property P, so maybe this
+        does too.  Unlike a deduction this cannot be verified from the store, so
+        it is returned as a low-confidence CONJECTURE -- a testable hypothesis the
+        life loop can later CONFIRM or be SURPRISED by, closing active inference.
+
+        Read-only on the store.  Returns {'discoveries': [(s,r,v,provenance)],
+        'conjectures': [(s,r,v,score,provenance)]}.  `seed` makes the wander
+        reproducible for the gate."""
+        import numpy as _np
+        from ikigai.cognition.phasor_state import cosine
+        rng = _np.random.default_rng(seed)
+        ents = sorted(self.entities)
+        discoveries, seen_d = [], set()
+
+        # ---- (1) DEDUCTIVE: chase learned closures the organism was never told
+        trans_links = [r for r in sorted(self.relations) if self.is_transitive(r)]
+        inh = [(rr.get('link'), rr.get('attr')) for rr in self.learned_rules
+               if rr.get('type') == 'inheritance']
+        sample = list(ents)
+        rng.shuffle(sample)
+        for e in sample:
+            if len(discoveries) >= max_deductive:
+                break
+            # transitive: every ancestor BEYOND the direct parent is derived-not-stored
+            for link in trans_links:
+                chain = self.transitive_reach(link, e) or []
+                for anc in chain[2:]:                       # chain[1] is the stored parent
+                    key = (e, link, anc)
+                    if key in seen_d:
+                        continue
+                    if self.transitive_related(link, e, anc):   # VERIFY the entailment
+                        seen_d.add(key)
+                        discoveries.append((e, link, anc, f'derived via {link}-closure'))
+            # inheritance: an attribute the entity carries only through an ancestor
+            for link, attr in inh:
+                if not attr or attr == '*':
+                    continue
+                if self.atom(attr, e):                      # already its own -- not a discovery
+                    continue
+                v = self.inherited_atom(attr, e)
+                if v:
+                    key = (e, attr, v)
+                    if key not in seen_d:
+                        seen_d.add(key)
+                        discoveries.append((e, attr, v, f'inherited {attr} up {link}'))
+        discoveries = discoveries[:max_deductive]
+
+        # ---- (2) ANALOGICAL: resonance-driven conjecture (a testable guess)
+        conjectures, seen_c = [], set()
+        # A dream SAMPLES -- it does not exhaustively scan the whole mind.  Bound
+        # the signature work to a random subset so a large store (tens of
+        # thousands of entities) does not stall the heartbeat; the subset is
+        # reshuffled each night by `seed`, so over many sleeps the whole store is
+        # visited.  Cost is O(max_scan) signatures, independent of store size.
+        scan = list(ents)
+        rng.shuffle(scan)
+        scan = scan[:max(max_analogical * 4, int(max_scan))]
+        sigs = {}
+        for e in scan:
+            s, props, n = self.entity_signature(e)
+            if s is not None and n:
+                sigs[e] = (s, dict(props))
+        keys = list(sigs)
+        rng.shuffle(keys)
+        for e in keys:
+            if len(conjectures) >= max_analogical:
+                break
+            se, pe = sigs[e]
+            # the peer whose SIGNATURE resonates most -- geometric, not a scan of shared keys
+            best_p, best_s = None, -1.0
+            for p in sigs:
+                if p == e:
+                    continue
+                cs = cosine(se, sigs[p][0])
+                if cs > best_s:
+                    best_p, best_s = p, cs
+            if best_p is None or best_s < resonance_thresh:
+                continue
+            pp = sigs[best_p][1]
+            for r, v in pp.items():                         # a property the peer has
+                if r in pe:                                 # entity already has this relation
+                    continue
+                if self.inherited_atom(r, e):               # or inherits it -- not a gap
+                    continue
+                ck = (e, r)
+                if ck in seen_c:
+                    continue
+                seen_c.add(ck)
+                conjectures.append((e, r, v, round(float(best_s), 3),
+                                    f'analogy with {best_p}'))
+                break                                       # one conjecture per entity per dream
+        conjectures = conjectures[:max_analogical]
+        return {'discoveries': discoveries, 'conjectures': conjectures}
+
+    def odd_one_out(self, entities):
+        """Day-87 -- fluid-reasoning IQ primitive: which one does NOT belong?
+        Each entity is its holographic SIGNATURE (bundle of bind(rel,val) over its
+        facts).  The outlier is the one that RESONATES LEAST with the bundle of the
+        others -- a pure geometric decision (cosine to the rest), no feature list,
+        no rule authored.  Returns (outlier, scores) where a lower score = more
+        different from the group."""
+        from ikigai.cognition.phasor_state import cosine
+        sigs = {}
+        for e in entities:
+            s, _p, n = self.entity_signature(e)
+            if s is not None and n:
+                sigs[e] = s
+        if len(sigs) < 3:
+            return None, {}
+        total = None
+        for s in sigs.values():
+            total = s if total is None else total + s
+        scores = {}
+        for e, s in sigs.items():
+            rest = total - s                      # the group WITHOUT e
+            scores[e] = round(float(cosine(s, rest)), 3)
+        outlier = min(scores, key=scores.get)
+        return outlier, scores
+
+    def counterfactual(self, entity, relation, new_value, probe_attrs=None):
+        """Day-87 GOLD -- NATIVE CAUSAL INTERVENTION.  Answer 'if ENTITY's
+        RELATION were NEW_VALUE, what would follow?' by INTERVENING on the
+        substrate -- installing a do-operator override on that one atom -- and
+        RE-DERIVING the downstream closure (its taxonomic chain + every attribute
+        it inherits), then diffing against the factual baseline.  There is no
+        learned causal model: causation here is STRUCTURAL DEPENDENCY made visible
+        by derive-chaining over the intervened world -- change an upstream atom and
+        the derived consequences move with it.  Read-only: the override is
+        installed, measured, and removed.  Returns {baseline, intervention,
+        counterfactual, changes}."""
+        entity = str(entity).strip().lower()
+        relation = self._norm_rel(relation)
+        new_value = str(new_value).strip().lower()
+        if probe_attrs is None:
+            from ikigai.cognition.rule_discovery import RuleMiner
+            _link, attr = RuleMiner.classify_relations(
+                self.triples, self.relations, self.entities)
+            probe_attrs = sorted(attr)
+
+        def snapshot():
+            s = {a: (self.atom(a, entity) or self.inherited_atom(a, entity))
+                 for a in probe_attrs}
+            if self.is_transitive(relation):
+                s['__chain__'] = self.transitive_reach(relation, entity)
+            return s
+
+        base = snapshot()
+        self._cf_override = {(entity, relation): new_value}
+        try:
+            cf = snapshot()
+        finally:
+            self._cf_override = None
+        changes = [{'what': k, 'was': base[k], 'now': cf[k]}
+                   for k in base if base[k] != cf[k]]
+        return {'baseline': base,
+                'intervention': f'{entity}.{relation} = {new_value}',
+                'counterfactual': cf, 'changes': changes}
+
+    def composed_atom(self, r1, r2, x):
+        """Apply a COMPOSED relation R1 o R2 to x: R1(R2(x)) -- resolve the inner
+        hop, then the outer, by derive-chaining over stored atoms (the sanctioned
+        substrate op, same as transitive_reach).  Read-only.  None if either hop
+        is undefined."""
+        y = self.atom(r2, x) or self.inherited_atom(r2, x)
+        if not y:
+            return None
+        return self.atom(r1, y) or self.inherited_atom(r1, y)
+
+    def composed_key(self, r1, r2):
+        """The invented relation's IDENTITY in the phasor algebra:
+        key(R1 o R2) = bind(key(R1), key(R2)) -- so a composed relation is a real
+        object in the substrate, not just a python label."""
+        from ikigai.cognition.phasor_state import bind
+        ck = self.gr.org.unified.ck
+        return bind(ck.key(str(r1)), ck.key(str(r2)))
+
+    def invent_relations(self, min_support=2, max_new=8):
+        """Day-87 GOLD -- RELATION INVENTION.  The organism grows its own
+        conceptual MACHINERY, not just facts: it COMPOSES two relations it
+        already has into a NEW named relation R3 = R1 o R2 (R3(x) = R1(R2(x))),
+        discovers which compositions are USEFUL, and can then derive facts that
+        no single stored relation could answer (nationality = country-of-birthplace,
+        never stored, always derivable).
+
+        DISCOVERY is store-structure mining -- the same honest meta-cognition the
+        RuleMiner does -- ranking ordered relation pairs by how many entities the
+        composition resolves for, and KEEPING only those whose (x -> z) reach is
+        NOT already provided by any single stored relation (genuinely new machinery,
+        not a rename).  The invented relation is given a real identity in the phasor
+        algebra (key = bind(key R1, key R2)); its APPLICATION is derive-chaining,
+        the sanctioned substrate op.  Recorded as learned 'composition' rules on
+        the organism.  Returns [{name, r1, r2, support, examples}], best first."""
+        rels = sorted(self.relations)
+        # a stored (subject -> value) pair under ANY single relation -- the reach
+        # the organism ALREADY has; a composition is only useful if it adds to it.
+        stored_pairs = {(s, v) for (s, _r), v in self.triples.items() if v}
+        # per-relation subject->value index (values may themselves be entities)
+        idx = {}
+        for r in rels:
+            idx[r] = {s: v for (s, rr), v in self.triples.items() if rr == r and v}
+        found = []
+        for r2 in rels:                        # inner hop (applied first)
+            for r1 in rels:                    # outer hop
+                if r1 == r2:
+                    continue                   # same-relation composition is transitivity (already mined)
+                support, examples = 0, []
+                for x, y in idx[r2].items():
+                    z = idx[r1].get(y)
+                    if z and (x, z) not in stored_pairs:   # genuinely NEW reach
+                        support += 1
+                        if len(examples) < 3:
+                            examples.append((x, z))
+                if support >= min_support:
+                    found.append({'name': f'{r1}-of-{r2}', 'r1': r1, 'r2': r2,
+                                  'support': support, 'examples': examples})
+        found.sort(key=lambda d: -d['support'])
+        found = found[:max_new]
+        # record as learned composition rules (so they persist + are enumerable)
+        existing = {(r.get('r1'), r.get('r2')) for r in self.learned_rules
+                    if r.get('type') == 'composition'}
+        for f in found:
+            if (f['r1'], f['r2']) not in existing:
+                self.learned_rules.append({'type': 'composition', 'name': f['name'],
+                                           'r1': f['r1'], 'r2': f['r2'],
+                                           'support': f['support']})
+        return found
+
+    def invented_relations(self):
+        """List the composition rules the organism has invented."""
+        return [r for r in self.learned_rules if r.get('type') == 'composition']
+
+    def derive_invented(self, name, x):
+        """Derive a named invented relation for x by chaining its two hops."""
+        for r in self.learned_rules:
+            if r.get('type') == 'composition' and r.get('name') == name:
+                return self.composed_atom(r['r1'], r['r2'], x)
+        return None
+
+    def induce_concept(self, examples, thresh=0.5):
+        """Day-85 GOLD -- INVENT a concept by anti-unification IN THE SUBSTRATE.
+        A property belongs to the concept iff its bind(key(rel),key(val))
+        RESONATES with EVERY example's holographic signature -- the shared
+        structure surfaces by binding + resonance, decided geometrically, NOT by
+        a python set-intersection.  (The atom store only lists each example's
+        candidate facts; the reasoning -- 'is this common?' -- is the cosine.)
+        Count-robust: the resonance is rescaled by sqrt(n_props) so a property's
+        presence does not wash out in a large bundle.  Returns
+        (schema {rel: val}, concept_hv).  No hardcoding, no curated features."""
+        from ikigai.cognition.phasor_state import bind, cosine
+        import math
+        ck = self.gr.org.unified.ck
+        sigs, cand = [], {}
+        for e in examples:
+            sig, props, n = self.entity_signature(e)
+            if sig is None:
+                return {}, None
+            sigs.append((sig, max(1, n)))
+            for (r, v) in props:
+                cand[(r, v)] = bind(ck.key(r), ck.key(v))
+        schema, concept_hv = {}, None
+        for (r, v), b in cand.items():
+            # present in EVERY example by resonance (norm-rescaled, count-robust)
+            if all(cosine(b, sig) * math.sqrt(n) >= thresh for sig, n in sigs):
+                schema[r] = v
+                concept_hv = b if concept_hv is None else concept_hv + b
+        return schema, concept_hv
+
+    def concept_member(self, entity, schema, thresh=0.5):
+        """Day-85 -- CLASSIFY an entity into an invented concept by SUBSTRATE
+        RESONANCE: it belongs iff every concept-property binding resonates with
+        the entity's own holographic signature (norm-rescaled).  Geometric
+        membership, not a dict lookup -- the substrate decides.  Returns
+        (is_member, min_score)."""
+        from ikigai.cognition.phasor_state import bind, cosine
+        import math
+        ck = self.gr.org.unified.ck
+        sig, _props, n = self.entity_signature(entity)
+        if sig is None or not schema:
+            return False, 0.0
+        rn = math.sqrt(max(1, n))
+        scores = [cosine(bind(ck.key(r), ck.key(v)), sig) * rn for r, v in schema.items()]
+        return (all(s >= thresh for s in scores), min(scores) if scores else 0.0)
 
     def has_inheritance_rule(self, attr, link):
         """Pack 326 -- True if a LEARNED inheritance rule (per-attr or wildcard)
@@ -525,6 +972,19 @@ class CompositionEngine:
         ents = sorted(self.entities)
         link_rels, attr_rels = RuleMiner.classify_relations(
             self.triples, self.relations, self.entities)
+        # Scale guard: the pair-miners (synonymy/inverse/inheritance) are
+        # O(rels^2 * entities).  A relation that appears on fewer than
+        # min_support subjects can never reach min_support in any rule, so it
+        # only inflates the quadratic.  Drop the low-support tail up front --
+        # on raw Wikidata truthy this collapses thousands of junk predicates
+        # (one-off external IDs, sitelinks) to the dense structural backbone,
+        # turning an intractable mine into an O(real_rels^2 * E) one.
+        rel_support = {}
+        for (s, r) in self.triples:
+            rel_support[r] = rel_support.get(r, 0) + 1
+        keep = {r for r, c in rel_support.items() if c >= min_support}
+        link_rels = [r for r in link_rels if r in keep]
+        attr_rels = [r for r in attr_rels if r in keep]
         found = miner.mine_all(ents, link_rels, attr_rels,
                                min_support=min_support, min_conf=min_conf,
                                verbose=verbose)
@@ -556,14 +1016,35 @@ class CompositionEngine:
             attr, link = r.get('attr'), r.get('link')
             if attr == '*':          # wildcard schema is not a per-attr compressor
                 continue
-            for x in sorted(self.entities):
-                mid = self.triples.get((x, link))            # link(x)
-                base = self.triples.get((x, attr))           # inherited value attr(x)
-                outer = self.triples.get((mid, attr)) if mid else None
-                # delete attr(link(x)) ONLY if the rule reproduces it exactly
-                if mid and outer is not None and base is not None \
-                        and outer == base:
-                    removed += self.atom_del(attr, mid)
+            if self.is_transitive(link):
+                # TAXONOMIC inheritance (attr inherits DOWN a transitive link such
+                # as subclassof): the DESCENDANT copy is redundant, derivable by
+                # climbing to the ancestor that defines it -- so drop attr(x) when
+                # the nearest ancestor carrying attr holds the SAME value, keeping
+                # the ancestor source and any exception (a descendant whose value
+                # differs).  Decisions use a snapshot so the climb is not perturbed
+                # by deletions; inherited_atom re-derives every dropped descendant.
+                snap = {x: self.triples.get((x, attr)) for x in self.entities}
+                for x in sorted(self.entities):
+                    xv = snap.get(x)
+                    if xv is None:
+                        continue
+                    chain = self.transitive_reach(link, x) or [x]
+                    for anc in chain[1:]:
+                        av = snap.get(anc)
+                        if av is not None:
+                            if av == xv:
+                                removed += self.atom_del(attr, x)
+                            break          # nearest ancestor with attr decides
+            else:
+                for x in sorted(self.entities):
+                    mid = self.triples.get((x, link))        # link(x)
+                    base = self.triples.get((x, attr))       # inherited value attr(x)
+                    outer = self.triples.get((mid, attr)) if mid else None
+                    # delete attr(link(x)) ONLY if the rule reproduces it exactly
+                    if mid and outer is not None and base is not None \
+                            and outer == base:
+                        removed += self.atom_del(attr, mid)
         return removed
 
     # ---- derivation -------------------------------------------------

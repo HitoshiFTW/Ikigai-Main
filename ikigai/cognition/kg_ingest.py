@@ -72,7 +72,13 @@ def parse_conceptnet(path, relations=None, min_weight=1.0, lang='en',
     skip_self  -- drop edges whose subject == object.
     """
     rel_filter = set(relations) if relations else None
-    opener = gzip.open if str(path).endswith('.gz') else open
+    if str(path).endswith('.bz2'):
+        import bz2
+        opener = bz2.open
+    elif str(path).endswith('.gz'):
+        opener = gzip.open
+    else:
+        opener = open
     n = 0
     with opener(path, 'rt', encoding='utf-8', errors='replace') as f:
         for line in f:
@@ -97,11 +103,26 @@ def parse_conceptnet(path, relations=None, min_weight=1.0, lang='en',
                 return
 
 
-def parse_ntriples(path, label_map=None, limit=None):
+def parse_ntriples(path, label_map=None, limit=None, obj_entity_only=False,
+                   pred_allow=None, progress_every=0):
     """Yield (subject, predicate, object) from an N-Triples dump (Wikidata
     truthy / DBpedia).  Each line: <s> <p> <o> .  If `label_map` (Qid->label
-    dict) is given, resolve entity URIs to labels.  Minimal -- expand when the
-    dump lands.  Stub kept to the same generator contract as parse_conceptnet.
+    dict) is given, resolve entity URIs to labels.
+
+    Raw Wikidata truthy is ~90% noise for the derive kernel: every item carries
+    ~900 predicates (labels, descriptions, sitelinks, external IDs in every
+    language) whose objects are literals, not entities.  Two filters keep only
+    the STRUCTURAL backbone -- the part the derive-not-store kernel multiplies:
+      obj_entity_only=True : keep a triple only if its object is a <URI> (an
+                             entity), dropping every literal/label/ext-id.  This
+                             collapses thousands of junk relations to the tens of
+                             real entity->entity properties (p31, p279, ...).
+      pred_allow={...}     : additionally restrict the predicate's last URI
+                             segment to a set (e.g. {'p279','p31'} for the pure
+                             subclass/instance taxonomic backbone).
+    `limit` counts EMITTED (post-filter) triples, so a backbone run reads as far
+    into the dump as needed to collect `limit` real edges.  progress_every>0
+    prints a heartbeat (read/kept/rate) to stderr every N read lines.
     """
     def _term(tok, last_segment=True):
         tok = tok.strip()
@@ -115,21 +136,45 @@ def parse_ntriples(path, label_map=None, limit=None):
             end = tok.rfind('"')
             return tok[1:end] if end > 0 else tok.strip('"')
         return tok
-    opener = gzip.open if str(path).endswith('.gz') else open
-    n = 0
+    if str(path).endswith('.bz2'):
+        import bz2
+        opener = bz2.open
+    elif str(path).endswith('.gz'):
+        opener = gzip.open
+    else:
+        opener = open
+    import sys as _sys, time as _time, re as _re
+    allow = set(pred_allow) if pred_allow else None
+    _qid = _re.compile(r'^q\d+$')          # a Wikidata entity object (Q-id)
+    n = 0; read = 0; t0 = _time.time()
     with opener(path, 'rt', encoding='utf-8', errors='replace') as f:
         for line in f:
+            read += 1
+            if progress_every and read % progress_every == 0:
+                dt = _time.time() - t0
+                _sys.stderr.write(
+                    f'[parse] read {read:,} kept {n:,} '
+                    f'({read/max(dt,1e-9):,.0f} lines/s) {dt:.0f}s\n')
+                _sys.stderr.flush()
             line = line.strip()
             if not line or line.startswith('#') or not line.endswith('.'):
                 continue
             parts = line[:-1].strip().split(' ', 2)
             if len(parts) < 3:
                 continue
-            s = _term(parts[0]); p = _term(parts[1])
-            o = _term(parts[2].rstrip(' .'))
+            otok = parts[2].rstrip(' .').strip()
+            if obj_entity_only and not otok.startswith('<'):
+                continue                       # object is a literal -> skip
+            p = _term(parts[1]).lower()
+            if allow is not None and p not in allow:
+                continue
+            s = _term(parts[0]); o = _term(otok)
             if not (s and p and o):
                 continue
-            yield (str(s).lower(), str(p).lower(), str(o).lower())
+            o = str(o).lower()
+            if obj_entity_only and not _qid.match(o):
+                continue                       # object URI is not a Q-entity
+            yield (str(s).lower(), str(p).lower(), o)
             n += 1
             if limit and n >= limit:
                 return

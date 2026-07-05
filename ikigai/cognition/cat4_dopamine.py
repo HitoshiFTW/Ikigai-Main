@@ -378,34 +378,49 @@ def _matches_expected(predicted, expected):
 # any of {arithmetic operator token, two or more pure-number tokens}.
 # Otherwise it is ATOMIC (a specific fact lookup).
 
-_COMPOSITIONAL_OPS = frozenset({
-    '+', '-', '*', '/', '=',
-    'plus', 'minus', 'times', 'multiplied', 'product', 'into',
-    'divided', 'over', 'sum', 'difference', 'quotient',
-})
+# Math SYMBOLS only -- structural tokens (the same class as digits), NOT
+# authored English content. Day-83 audit DE-HARDCODE: the old frozenset also
+# listed English op-WORDS (plus/minus/times/divided/...), an authored content
+# list on the production reasoning path. Those are removed; English operators
+# are now recognised EMERGENTLY via an injected op_detector backed by
+# cat3.detect_operator (learned from a*b==c chains, no lexicon).
+_OP_SYMBOLS = frozenset({'+', '-', '*', '/', '='})
 
 _NUM_RE = re.compile(r'^-?\d+$')
 
 
-def is_compositional_query(text):
-    """True when the query carries arithmetic structure that the
-    substrate can recompute from primitives without cache help."""
+def is_compositional_query(text, op_detector=None):
+    """True when the query carries arithmetic structure the substrate can
+    recompute from primitives without cache help. Compositional iff:
+      (a) >= 2 numeric tokens (structural), or
+      (b) a math SYMBOL (+ - * / =) is present (structural, like a digit), or
+      (c) a token is recognised as an arithmetic OPERATOR by `op_detector`
+          (EMERGENT -- cat3.detect_operator, learned not authored).
+    With no op_detector supplied, only the structural rules (a)+(b) apply --
+    no authored English op-word list anywhere. The >=2-number rule already
+    covers ordinary 'A op B' arithmetic; the detector adds 1-operand forms."""
     if not text:
         return False
     tokens = re.findall(r"[a-z]+|-?\d+|[+\-*/=]", str(text).lower())
     num_count = 0
     for t in tokens:
-        if t in _COMPOSITIONAL_OPS:
+        if t in _OP_SYMBOLS:
             return True
         if _NUM_RE.match(t):
             num_count += 1
             if num_count >= 2:
                 return True
+        elif op_detector is not None:
+            try:
+                if op_detector(t):
+                    return True
+            except Exception:
+                pass
     return False
 
 
-def is_atomic_query(text):
-    return not is_compositional_query(text)
+def is_atomic_query(text, op_detector=None):
+    return not is_compositional_query(text, op_detector=op_detector)
 
 
 class Cat4Dopamine:

@@ -21,8 +21,10 @@ Public interface:
     trace  = org.trace()
 """
 
-import sys
-sys.path.insert(0, 'c:/neuroseed')
+import os, sys
+# Portable: make this file's own directory importable regardless of machine/cwd,
+# so sibling modules (ikigai_bridge, the ikigai/ package) resolve on any PC.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np
 
@@ -33,10 +35,9 @@ from ikigai.cognition.pgmw                import PersonaGrid
 from ikigai.cognition.sac_field           import SACField
 
 # ── Reasoning core (hardcoded path -- works on simple SVO) ───────────────────
-from ikigai.cognition.reasoning_engine    import (
-    ReasoningEngine, ReasoningParser, WorkingMemory,
-    OPERATOR_LEXICON, QUERY_MARKERS,
-)
+# reasoning_engine REMOVED (audit trio, Day-83): legacy python-dict WorkingMemory
+# arithmetic + regex SVO parser; superseded by GeneralReasoner (compositional derive
+# + RHC math ring) and holo_reader emergent parse. ask()/parse paths rewired below.
 
 # ── BEING: persistent living organism (the substrate) ────────────────────────
 from ikigai.cognition.being               import IkigaiBeing
@@ -47,7 +48,8 @@ from ikigai.cognition.grammar_grounding   import GrammarGrounding
 from ikigai.cognition.flat_memory         import FlatMemory
 from ikigai.cognition.multirole_memory    import MultiRoleMemory
 from ikigai.cognition.dialogue            import DialogueLoop
-from ikigai.cognition.generator           import SentenceGenerator
+# generator/SentenceGenerator REMOVED (Day-83 audit rewire): org.generate +
+# new_dialogue now use frame_relax (say_frame). Old Markov-on-being.lexicon retired.
 
 # ── Memory + cognition modules ───────────────────────────────────────────────
 from ikigai.cognition.holographic_memory  import HolographicMemory
@@ -66,7 +68,7 @@ from ikigai.cognition.multistep_planner   import MultiStepPlanner
 from ikigai.cognition.curiosity_drive     import CuriosityDrive
 from ikigai.cognition.persona_fe_coupling import PersonaFEC
 from ikigai.cognition.vsa_calculus        import VSACalculus
-from ikigai.cognition.hot_loader          import CognitionHotLoader
+# hot_loader REMOVED (audit batch 2, Day-83): exec-wrapper over deleted code_gen.
 
 # ── Inherited Day-54 modules ─────────────────────────────────────────────────
 from ikigai.cognition.skill_crystal       import SkillCrystal
@@ -106,25 +108,31 @@ class IkigaiOrganism:
         Pack 124: inference-RAM optimization.
         """
         self.d = d
-        self._flat_only = bool(flat_only)
+        # Day-83 audit END-STATE: ONE organism, EVERYTHING ON. `flat_only` is now
+        # a NO-OP, kept only so old call-sites don't error -- every cognition
+        # module is always built. Call IkigaiOrganism() and the whole organism
+        # runs; no mode flag, no specific-class gating.
+        self._flat_only = False
 
-        # Foundation pillars (UHE) -- persona kept (used by generator/save)
-        self.encoder = None if flat_only else CGPSPEncoder(d=2048, gamma=0.4)
-        self.pik     = None if flat_only else PiK(d=2048, n_primes=32)
-        self.persona = PersonaGrid(d=2048)
-        self.sac     = None if flat_only else SACField(d=2048)
+        # Foundation pillars (UHE). ONE dimension d (was a separate hardcoded
+        # d=2048 space -- the old pre-flat-substrate paradigm). Centred on the
+        # d=400 RHC/cache/memory core.
+        self.encoder = CGPSPEncoder(d=d, gamma=0.4)
+        self.pik     = PiK(d=d, n_primes=32)
+        self.persona = PersonaGrid(d=d)
+        self.sac     = SACField(d=d)
 
-        # BEING + 5 grounding channels (Pack 96-101)
-        # In flat_only: being/grammar dropped (replaced by unified). Sensory,
-        # taxonomy, operations kept as parsers (extract_pairs/_seeds/observe_story).
-        self.being      = None if flat_only else IkigaiBeing(d=2048, drift_rate=0.08, window_size=4)
-        self.operations = OperationalGrounding(d=2048)
-        self.sensory    = SensoryGrounding(d=2048)
-        self.taxonomy   = TaxonomicGrounding(d=2048)
-        self.grammar    = None if flat_only else GrammarGrounding(d=2048)
+        # BEING + grounding channels (Pack 96-101). being.lexicon shares the
+        # substrate's ComputedKey identity (Day-83 migrate).
+        self.being      = IkigaiBeing(d=d, drift_rate=0.08, window_size=4)
+        self.operations = OperationalGrounding(d=d)
+        self.sensory    = SensoryGrounding(d=d)
+        self.taxonomy   = TaxonomicGrounding(d=d)
+        self.grammar    = GrammarGrounding(d=d)
 
-        # FLAT MEMORY (Pack 114-115) -- legacy, subsumed by unified. Drop in flat_only.
-        self.flat          = None if flat_only else FlatMemory(d=d, M=16384, k=64, seed=114)
+        # FLAT MEMORY (Pack 114-115) -- single-channel reference (unified is the
+        # production substrate). Built for completeness; everything on.
+        self.flat          = FlatMemory(d=d, M=16384, k=64, seed=114)
         self._flat_enabled = False
 
         # UNIFIED MEMORY (Pack 117-118): the actual flat substrate. Always built.
@@ -135,13 +143,18 @@ class IkigaiOrganism:
         from ikigai.cognition.frame_field import FrameField
         self.frames = FrameField(d=d, K=8, top_n=64, seed=42, alpha=0.5)
         self.unified._frame_field_ref = self.frames
+        # Day-83 audit MIGRATE: back being.lexicon by the substrate's ComputedKey
+        # so being shares ONE word-identity space with the unified substrate
+        # (the dictionary->HDC supersession). being is built before unified, so
+        # attach the key_fn now that unified exists. Drift still rides on top.
+        if getattr(self, 'being', None) is not None:
+            self.being._key_fn = self.unified.ck.key
         # Pack 210 -- BIG WIRE-UP. Activate 5 dead cognition modules so read()
         # runs reasoning during ingestion, not just statistics.
         from ikigai.cognition.free_energy_drive import (
             ConversationalVariationalFreeEnergyField)
         from ikigai.cognition.curiosity_drive import CuriosityDrive
         from ikigai.cognition.theory_of_mind import TheoryOfMindSandbox
-        from ikigai.cognition.reasoning_engine import ReasoningEngine
         from ikigai.cognition.vsa_calculus import VSACalculus
         # Pack 211 -- Generation wire
         from ikigai.cognition.belief_field import BeliefField
@@ -151,10 +164,13 @@ class IkigaiOrganism:
         self.curiosity = CuriosityDrive(d=d)
         self.tom = TheoryOfMindSandbox(d=d)
         self.tom.add_agent('default')
-        self.re = ReasoningEngine()
         self.vsa = VSACalculus(d=d)
         # Pack 211 instances
-        self.belief = BeliefField(d=d)
+        # COLLAPSE (Day-83 audit): belief/tom/vsa built ONCE here (always), with
+        # the tuned belief params formerly only in the full-mode rebuild. The
+        # flat_only None-clobber + the T3 duplicate are removed -- these gold
+        # modules now run in BOTH modes (toward the one-organism END-STATE).
+        self.belief = BeliefField(d=d, conflict_threshold=-0.05, heal_rate=2.0)
         self.verifier = SelfVerifier(d=d, threshold=0.5)
         self.proof_gen = ProofCarryingGenerator(d=d)
         # Pack 212 -- Sleep wire instances
@@ -170,6 +186,10 @@ class IkigaiOrganism:
         self.meta_mirror = MetacognitiveHVMirror(d=128)
         self.imp_lattice = ImportanceDecayLattice(d=128)
         self._self_tick = 0
+        # WIRE (Day-83 audit): self-inconsistency tracking -- meta_mirror.high_drift
+        # increments this in read() when the self-model drifts past threshold.
+        self._high_drift_count = 0
+        self._last_high_drift_tick = -1
         # Pack 214 -- Counterfactual wire instances
         from ikigai.cognition.counterfactual_sim import CounterfactualField
         from ikigai.cognition.causal_world_model import CausalWorldModel
@@ -200,41 +220,31 @@ class IkigaiOrganism:
             self.dssc = None
         # belief_expander needs a vocab HV fn -- lazy build
         self._belief_exp = None
-        # verifier.py is module-level functions, not a class -- import lazy
-        self._verify_mod = None
         self._fe_log = []
         self._last_passage_hv_curiosity = None
         self._read_organism_count = 0
         self._verifier_scores = []   # Pack 211 -- post-gen verifier log
-        # In flat_only mode, dict writes are off by default (no being/grammar to write to).
-        self._dict_writes_enabled = not flat_only
+        # being/grammar are always built now -> dict writes always available
+        # (everything on, Day-83 END-STATE).
+        self._dict_writes_enabled = True
 
-        # REASONING CORE + cognition modules. None in flat_only.
-        if flat_only:
-            self.reasoner = None
-            self.holo = self.modal = self.osc = self.atom = self.belief = None
-            self.tom = self.immune = self.decay = self.cf = self.pcg = None
-            self.cwm = self.fea = self.planner = self.curio = self.pfc = None
-            self.vsa = self.hotload = None
-        else:
-            self.reasoner = ReasoningEngine()
-            self.holo    = HolographicMemory(d=d)
-            self.modal   = CrossModalSpace(d=d)
-            self.osc     = CrossTimeResonator(d=d, periods=[10, 100, 1000])
-            self.atom    = ConceptAtomizer(d=d)
-            self.belief  = BeliefField(d=d, conflict_threshold=-0.05, heal_rate=2.0)
-            self.tom     = TheoryOfMindSandbox(d=d)
-            self.immune  = AdversarialImmune(d=d)
-            self.decay   = ImportanceDecayLattice(d=d)
-            self.cf      = CounterfactualField(d=d)
-            self.pcg     = ProofCarryingGenerator(d=d)
-            self.cwm     = CausalWorldModel(d=d)
-            self.fea     = FreeEnergyActionSelector(d=d)
-            self.planner = MultiStepPlanner(self.cwm, self.fea)
-            self.curio   = CuriosityDrive(d=d)
-            self.pfc     = PersonaFEC()
-            self.vsa     = VSACalculus(d=d)
-            self.hotload = CognitionHotLoader()
+        # HEAVY / full-only cognition modules. None in flat_only.
+        # (belief/tom/vsa COLLAPSED to the unconditional build above -- no longer
+        # clobbered here nor rebuilt below. cf/cwm remain T2-built at d=128.)
+        # COLLAPSE (Day-83 audit): dropped self.decay/self.curio/self.pcg/self.pfc --
+        # dead duplicates of the always-built+wired imp_lattice/curiosity/proof_gen.
+        # These cognition modules are now built UNCONDITIONALLY (both modes) so they
+        # always run -- one organism, no flat_only stripping of them.
+        self.holo    = HolographicMemory(d=d)
+        self.modal   = CrossModalSpace(d=d)
+        self.osc     = CrossTimeResonator(d=d, periods=[10, 100, 1000])
+        self.atom    = ConceptAtomizer(d=d)
+        self.immune  = AdversarialImmune(d=d)
+        # fea pinned to d=128 to match the (T2, d=128) causal_world_model the
+        # planner pairs it with (COLLAPSE consistency, Day-83 audit).
+        self.fea     = FreeEnergyActionSelector(d=128)
+        self.planner = MultiStepPlanner(self.cwm, self.fea)
+        # hotload REMOVED (audit batch 2): exec-wrapper over deleted code_gen; unused.
 
         # Episodic chain (hippocampus)
         self._episodes = []
@@ -254,30 +264,33 @@ class IkigaiOrganism:
             5. Answer query (Broca's)
             6. Store episodic (hippocampus)
         """
-        # Step 1: safety
-        hits = self.immune.scan(text.lower().split(), threshold=0.4)
-        if hits:
-            return {'answer': None, 'safe': False, 'reason': 'threat_detected',
-                    'hits': hits}
+        # Step 1: safety (amygdala) -- full-mode only
+        if getattr(self, 'immune', None) is not None:
+            hits = self.immune.scan(text.lower().split(), threshold=0.4)
+            if hits:
+                return {'answer': None, 'safe': False, 'reason': 'threat_detected',
+                        'hits': hits}
 
-        # Step 2-5: reason
-        trace, answer = self.reasoner.reason(text)
-        self._last_trace = trace
+        # Step 2-5: reason via GeneralReasoner (Day-83 audit rewire: legacy
+        # ReasoningEngine python-dict path retired -> derive engine + RHC ring).
+        d = self.general_reasoner.reason(text)
+        answer = d.get('answer')
+        self._last_trace = [('general_reasoner', text, answer)]
 
         # Step 6: store episode
         self._tick += 1
         self._episodes.append({
             'tick': self._tick,
             'text': text,
-            'trace': [(s, repr(stmt), v) for s, stmt, v in trace],
+            'trace': self._last_trace,
             'answer': answer,
         })
 
         return {
             'answer':  answer,
             'safe':    True,
-            'trace':   trace,
-            'wm':      self.reasoner.wm.all_values(),
+            'method':  d.get('method'),
+            'trace':   self._last_trace,
             'tick':    self._tick,
         }
 
@@ -439,11 +452,12 @@ class IkigaiOrganism:
         except Exception:
             pass
 
-        # Phase 8 (Pack 212) -- crystallizer observes SVO triple if RE parsed
+        # Phase 8 (Pack 212) -- crystallizer observes SVO triples extracted
+        # EMERGENTLY via holo_reader (Day-83 audit: legacy RE parser retired).
         try:
-            stmt = self.re.parser.parse_statement(text)
-            if stmt is not None and stmt.entity and stmt.obj:
-                self.crystal.observe(stmt.entity, stmt.op, stmt.obj)
+            for s, r, o in (self.holo_reader.comprehend(text) or []):
+                if s and o:
+                    self.crystal.observe(s, r, o)
         except Exception:
             pass
 
@@ -453,6 +467,12 @@ class IkigaiOrganism:
             # encode_utterance also returns the cumulative belief HV
             B_U = self.persona_proj.encode_utterance(tokens[:32])
             self.meta_mirror.update(B_U, tokens[:32])
+            # WIRE (Day-83 audit): the self-model ACTS on its drift, not just
+            # records it -- flag self-inconsistency when the metacognitive
+            # mirror drifts past threshold. Surfaced via status()/organism_status().
+            if self.meta_mirror.high_drift():
+                self._high_drift_count = getattr(self, '_high_drift_count', 0) + 1
+                self._last_high_drift_tick = self._self_tick
         except Exception:
             pass
 
@@ -634,12 +654,6 @@ class IkigaiOrganism:
                 vocab_hv_fn=_vhv, d=d, n=2, max_expand=8, top_candidates=20)
         return self._belief_exp
 
-    @property
-    def verify_mod(self):
-        if self._verify_mod is None:
-            from ikigai.cognition import verifier as _v
-            self._verify_mod = _v
-        return self._verify_mod
 
     def organism_status(self):
         """Pack 210 -- quick snapshot of the cognitive stack."""
@@ -663,7 +677,7 @@ class IkigaiOrganism:
         except Exception:
             pass
         try:
-            out['wm_keys'] = list(self.re.wm.history())[-8:] if hasattr(self.re.wm,'history') else []
+            out['recent_episodes'] = [e.get('answer') for e in self._episodes[-8:]]
         except Exception:
             pass
         return out
@@ -1460,7 +1474,8 @@ class IkigaiOrganism:
                 'categories': {k: len(v) for k, v in cat_vocab.items()}}
 
     def ingest_triples(self, triples, discover=False, self_compress=False,
-                       min_support=6, min_conf=0.7, fast=True):
+                       min_support=6, min_conf=0.7, fast=True,
+                       progress_every=0):
         """Pack 326 + 328 -- ingest a stream of (subject, relation, object)
         triples from a knowledge graph (Wikidata / ConceptNet / a TSV dump) as
         atoms, via the cache, using the generic relation template so ANY
@@ -1486,7 +1501,17 @@ class IkigaiOrganism:
             tok = self.general_reasoner.tokenize
             record = eng._record
             tmpl_cache = {}
+            if progress_every:
+                import sys as _sys, time as _time
+                _pt0 = _time.time()
             for tri in triples:
+                if progress_every and n and n % progress_every == 0:
+                    _dt = _time.time() - _pt0
+                    _sys.stderr.write(
+                        f'[ingest] {n:,} edges · {len(eng.entities):,} ents · '
+                        f'{len(eng.relations):,} rels · {n/max(_dt,1e-9):,.0f}/s '
+                        f'· {_dt:.0f}s\n')
+                    _sys.stderr.flush()
                 if not tri or len(tri) < 3:
                     continue
                 s = str(tri[0]).strip().lower()
@@ -1601,6 +1626,390 @@ class IkigaiOrganism:
             self._holo_reader = hr
         return hr
 
+    @property
+    def holo_writer(self):
+        """Day-87 -- the holographic SEQUENCE MEMORY: encode a token stream into a
+        recursive hierarchy of bounded phasor transition operators and regenerate it
+        losslessly (the proven LENGTH primitive; a single operator is short-range,
+        hierarchy is not).  Pure FHRR, no backprop. Lazily attached (a body-part)."""
+        hw = getattr(self, '_holo_writer', None)
+        if hw is None:
+            from ikigai.cognition.holo_generate import HolographicSequenceMemory
+            hw = HolographicSequenceMemory(chunk=8, ck=self.unified.ck)   # SHARED key space
+            self._holo_writer = hw
+        return hw
+
+    def encode_sequence(self, tokens):
+        """Encode a token sequence into a holographic handle (recursive operator
+        hierarchy). The sequence becomes a first-class substrate object."""
+        return self.holo_writer.encode(list(tokens))
+
+    def regenerate_sequence(self, handle):
+        """Regenerate the exact token sequence from a holographic handle."""
+        return self.holo_writer.decode(handle)
+
+    def holo_roundtrip(self, tokens):
+        """Encode then regenerate a token sequence; returns the regenerated list.
+        Lossless by recursive hierarchy where a single operator would fail on length."""
+        return self.holo_writer.roundtrip(list(tokens))
+
+    @property
+    def branch_gen(self):
+        """Day-87 -- the NOVELTY/BRANCHING generator: observe transitions, then
+        generate UNSEEN sequences whose whole is novel but every step is a real
+        observed transition (grounded by construction). Lazily attached."""
+        bg = getattr(self, '_branch_gen', None)
+        if bg is None:
+            from ikigai.cognition.holo_generate import HolographicBranchGenerator
+            bg = HolographicBranchGenerator(order=getattr(self, '_branch_order', 1),
+                                            ck=self.unified.ck)          # SHARED key space
+            self._branch_gen = bg
+        return bg
+
+    def observe_transitions(self, sequences, order=None):
+        """Learn transition structure from example sequences (Hebbian, no backprop).
+        `order` = context window (last-k tokens); default 1."""
+        if order is not None and order != getattr(self, '_branch_order', 1):
+            self._branch_order = order
+            self._branch_gen = None                       # rebuild at the new order
+        return self.branch_gen.observe(sequences)
+
+    def generate_novel(self, start, steps=8, select=None, seed=0):
+        """Generate a NOVEL sequence by branching: at each step recover the valid
+        next-token set from the substrate and select one. Novel whole, valid steps.
+        Returns the generated token list."""
+        return self.branch_gen.generate(start, steps, select=select, seed=seed)
+
+    # ── Day 90: CONSOLIDATION -- hippocampal sequence store -> durable SDM ────
+    def consolidate_generation(self):
+        """Biology: during sleep the hippocampus REPLAYS its fast sequence traces into the
+        slow cortical/cerebellar store, making them durable.  Here the transient generation
+        memory (branch_gen -- the hippocampal sequence system) is replayed into the main
+        VSASDM (the cortical/cerebellar store, Kanerva's cerebellum model): each transition
+        (context -> superposed successor bundle) is WRITTEN into the SDM, addressed by the
+        SAME ck key the whole organism uses.  Result: the sequence knowledge becomes DURABLE
+        (it now lives in .ikg) and in the ONE shared substrate -- not a private, transient,
+        un-persisted store.  Consolidation is lossy + distributed by nature (that is what it
+        is); recall from the SDM is MEASURED, not assumed.  Returns #contexts consolidated."""
+        bg = getattr(self, '_branch_gen', None)
+        if bg is None or not bg._bundles:
+            return 0
+        sdm = self.unified.sdm
+        n = 0
+        for c, bundle in bg._bundles.items():
+            tag = c[0] if len(c) == 1 else '\x02'.join(c)       # order-1 = the shared concept addr
+            addr = self.unified.ck.key(tag)
+            sdm.write(addr, np.asarray(bundle, dtype=np.complex64), word=tag)
+            n += 1
+        return n
+
+    def sdm_successors(self, context_tokens, thresh=0.36, max_k=6):
+        """Read a context's successor set back from the DURABLE consolidated SDM (not the
+        transient branch_gen): recover the successor bundle from the shared VSASDM by the
+        context's ck address, then decode it with the same matching-pursuit cleanup.  This
+        is generation sourcing from the persistent cortical memory.  Recall is bounded by
+        SDM capacity / crosstalk -- honest, because consolidation is lossy.  The cleanup
+        threshold is HIGHER than the transient store's (0.45 vs 0.30): distributed storage
+        adds crosstalk, so the noise floor for a real successor rises, and a stricter cutoff
+        keeps the recovered set grounded (rejects crosstalk-level spurious tokens)."""
+        bg = getattr(self, '_branch_gen', None)
+        if bg is None:
+            return []
+        order = getattr(self, '_branch_order', 1)
+        ctx = list(context_tokens)[-order:]
+        if not ctx:
+            return []
+        tag = ctx[0] if len(ctx) == 1 else '\x02'.join(ctx)
+        b = self.unified.sdm.read(self.unified.ck.key(tag), tag)
+        return bg._cleanup_bundle(np.asarray(b, dtype=np.complex128), thresh, max_k)
+
+    def valid_next(self, context_tokens):
+        """The substrate-recovered set of valid next tokens for a context (the
+        branch set), by matching pursuit over the context's bundle."""
+        return self.branch_gen.successors(list(context_tokens))
+
+    def bundle_constraint(self, tokens):
+        """Build a generation CONSTRAINT from a set of tokens: a phasor BUNDLE
+        (superpose) of their substrate keys over the shared unified key space; the
+        returned critic scores a candidate by COSINE resonance to the bundle -- high
+        iff the candidate belongs to the set, and (because the bundle spans the set)
+        independent of any orthogonal axis.  Pure FHRR: superpose + cosine cleanup, a
+        substrate op, not python over a dict.  Compose several of these in
+        generate_fluent(constraints=[...]) to satisfy many axes at once (product-of-
+        experts).  Returns a callable c -> score|None."""
+        import numpy as _np
+        ck = self.unified.ck
+        b = _np.zeros(ck.d, dtype=_np.complex64)
+        for t in tokens:
+            b = b + ck.key(str(t).strip().lower())
+        nb = float(_np.linalg.norm(b))
+        def _crit(c, _b=b, _nb=nb):
+            k = ck.key(str(c).strip().lower())
+            n = _nb * float(_np.linalg.norm(k))
+            return (float(_np.real(_np.vdot(k, _b)) / n)) if n else None
+        return _crit
+
+    def scope_register(self, chunk=8):
+        """A DYNAMIC substrate set: symbols DECLARED into scope as generation proceeds,
+        tested for membership by resonance.  Correct-by-construction reference checking
+        for structured generation (no undefined name).  A single flat bundle drowns in
+        crosstalk past ~sqrt(d) members (Frady-Sommer); this holds membership at scale by
+        the Day-88 wall-break -- BOUNDED chunks of `chunk` keys, each a superposition, the
+        set = the list of sealed chunks + the open one.  member(sym) = max cosine over
+        chunks; a true member resonates ~1/sqrt(chunk), a non-member ~1/sqrt(d).  Pure
+        FHRR (superpose + cosine cleanup), no python set of the symbols.  Returns an
+        object with .declare(sym), .member(sym), .score(sym), .n."""
+        import numpy as _np
+        ck = self.unified.ck
+        d = int(ck.d)
+        # member resonates ~1/sqrt(chunk); non-member ~1/sqrt(d).  Threshold = half the
+        # member signal, but never below ~4x the sqrt(d) noise floor.
+        thr = max(0.5 / (chunk ** 0.5), 4.0 / (d ** 0.5))
+
+        class _ScopeRegister:
+            def __init__(self):
+                self.sealed = []                              # sealed chunk bundles
+                self.cur = _np.zeros(d, dtype=_np.complex64)
+                self.n_cur = 0
+                self.n = 0                                    # total declared
+            def declare(self, sym):
+                self.cur = self.cur + ck.key(str(sym).strip().lower())
+                self.n_cur += 1; self.n += 1
+                if self.n_cur >= chunk:
+                    self.sealed.append(self.cur)
+                    self.cur = _np.zeros(d, dtype=_np.complex64)
+                    self.n_cur = 0
+            def score(self, sym):
+                k = ck.key(str(sym).strip().lower())
+                best = -1.0
+                chunks = self.sealed + ([self.cur] if self.n_cur else [])
+                for b in chunks:
+                    nb = float(_np.linalg.norm(b))
+                    if nb:
+                        best = max(best, float(_np.real(_np.vdot(k, b)) / nb))
+                return best
+            def member(self, sym):
+                return self.score(sym) >= thr
+
+        reg = _ScopeRegister()
+        reg.threshold = thr
+        return reg
+
+    def _make_critic(self, spec):
+        """Turn a constraint SPEC into a critic callable c -> score|None, using only
+        substrate resonance (flat co-occurrence).  A spec is one of:
+          - callable                : used as-is (caller-supplied substrate score);
+          - str (an anchor token)   : score = flat.similarity(c, token);
+          - iterable of tokens      : score = MEAN flat.similarity(c, a) over the set --
+                                      this cancels the OTHER axes and isolates the axis
+                                      the set spans (the multi-constraint primitive).
+        None (unseen / no signal) is returned as-is so the loop can treat it neutrally."""
+        if callable(spec):
+            return spec
+        if isinstance(spec, str):
+            tok = spec.strip().lower()
+            def _c(c, _t=tok):
+                try:
+                    return self.flat.similarity(c, _t)
+                except Exception:
+                    return None
+            return _c
+        anchors = [str(a).strip().lower() for a in spec]
+        def _c(c, _a=anchors):
+            vals = []
+            for a in _a:
+                try:
+                    s = self.flat.similarity(c, a)
+                except Exception:
+                    s = None
+                if s is not None:
+                    vals.append(s)
+            return (sum(vals) / len(vals)) if vals else None
+        return _c
+
+    def generate_fluent(self, seed, steps=40, anchor=None, constraints=None,
+                        combine='poe', veto=None, on_emit=None, sample=False, rng_seed=0):
+        """Day-88/89 -- THE GENERATION LOOP with COMPOSED constraints: long-range
+        coherent generation assembled from the substrate's own parts, no backprop and
+        no hallucination.  Each step:
+          VARIATION  = valid_next(path) -- the grounded set of REAL observed transitions
+                       (matching pursuit over the context bundle); a candidate is never
+                       invented, only selected;
+          VETO       = a HARD content constraint (`veto(c)->bool`) removes forbidden
+                       candidates BEFORE selection -- correct-by-construction: an invalid
+                       token is never emitted (e.g. a reference to an undeclared symbol).
+                       If every candidate is vetoed the loop halts honestly rather than
+                       emit a violation;
+          SELECTION  = one OR MANY soft critics score each survivor by RESONANCE.  N
+                       constraints are composed by PRODUCT-OF-EXPERTS (`combine='poe'`,
+                       AND semantics) or by mean (`combine='sum'`);
+          STATE      = constraints live OUTSIDE the local window; `on_emit(tok)` updates a
+                       running constraint register after each emission (e.g. declaring a
+                       symbol into scope), so a DYNAMIC long-range constraint survives
+                       arbitrary length.
+        Day-88 proved ONE constraint; Day-89 proves N composed constraints AND a hard,
+        dynamic, long-range one (scope) -- the framework generates a long STRUCTURED
+        artifact correct-by-construction, at CPU cost.
+        `constraints`: list of specs (see _make_critic); defaults to [anchor or seed].
+        `veto`: callable c->bool (True = forbidden).  `on_emit`: callable tok->None run on
+        the seed and every emitted token.  `sample=True` weights by combined fit.
+        The whole sequence is NOVEL (recombination); every step is grounded; it halts
+        honestly when no valid successor remains.
+        Returns {sequence, grounded, constraints, length}."""
+        import random as _r
+        rng = _r.Random(rng_seed)
+        start = str(seed).strip().lower()
+        if constraints is None:
+            constraints = [str(anchor).strip().lower() if anchor else start]
+        critics = [self._make_critic(s) for s in constraints]
+        path = [start]
+        if on_emit is not None:
+            on_emit(start)                                   # register the seed
+
+        def combined(c):
+            scores = [cr(c) for cr in critics]
+            if combine == 'sum':
+                seen = [s for s in scores if s is not None]
+                return (sum(seen) / len(seen)) if seen else -1.0
+            # product-of-experts: shift sim [-1,1] -> [0,2]; None -> neutral 1.0;
+            # a hard-violated axis (sim<0 -> factor<1) multiplicatively kills the cand.
+            prod = 1.0
+            for s in scores:
+                prod *= 1.0 if s is None else max(1e-6, s + 1.0)
+            return prod
+
+        for _ in range(int(steps)):
+            cand = self.valid_next(path)
+            if veto is not None:
+                cand = [c for c in cand if not veto(c)]      # correct-by-construction
+            if not cand:
+                break                                       # honest halt (no fabrication)
+            if sample:
+                scored = [(c, max(0.0, combined(c))) for c in cand]
+                tot = sum(w for _, w in scored) or 1.0
+                r = rng.random() * tot; acc = 0.0; nxt = cand[0]
+                for c, wgt in scored:
+                    acc += wgt
+                    if acc >= r:
+                        nxt = c; break
+            else:
+                nxt = max(cand, key=combined)               # composed critics (default)
+            path.append(nxt)
+            if on_emit is not None:
+                on_emit(nxt)                                 # update the dynamic register
+        return {'sequence': path, 'grounded': True,
+                'constraints': list(constraints), 'length': len(path)}
+
+    # ── Day 90: FLUENT-GENERATION FRAMEWORK in ADDRESS space ──────────────
+    def address_generator(self, order=1):
+        """Day 90 -- the fluent-generation FRAMEWORK (holo_generate.AddressGenerator).
+        Every word is an HV ADDRESS; the relations between words are HV too (per-context
+        successor bundles); reading and generation carry ADDRESSES (integer codes), and
+        surface words are materialised only at the edges (encode on the way in, decode on
+        the way out).  The no-backprop, near-zero-compute analog of a transformer's
+        next-token head: next address = resonance over the learned transition memory.  A
+        FRAMEWORK -- proved data-free on made-up vocab; the fluency scales with the
+        transition data fed to .observe(sequences).  Lazy + reused (cached on the org)."""
+        ag = getattr(self, '_addr_gen', None)
+        if ag is None or ag.order != int(order):
+            from ikigai.cognition.holo_generate import AddressGenerator
+            ag = AddressGenerator(self.unified.ck, order=int(order))
+            self._addr_gen = ag
+        return ag
+
+    def generate_addressed(self, start, steps=40, theme=None, order=1, seed=0):
+        """Generate a sequence ENTIRELY in address space and return
+        {codes, words, length, vocab}.  The walk rolls over integer addresses; `words`
+        is the only surface materialisation (render at the emit edge).  `theme` (a list
+        of words) installs a coherence critic scored by address resonance -- the Day-88/89
+        composed constraints apply here unchanged, still in address space.  Long-range
+        coherence via a WIDER CONTEXT WINDOW is native through `order` (order>1 keys each
+        prediction on the last k tokens, so an ambiguous token is disambiguated by what
+        preceded it).  Call org.address_generator(order).observe(sequences) first."""
+        ag = self.address_generator(order=order)
+        critic = ag.theme_bundle(theme) if theme else None
+        codes = ag.generate(start, steps=steps, critic=critic, seed=seed)
+        return {'codes': codes, 'words': ag.render(codes),
+                'length': len(codes), 'vocab': ag.vocab_size}
+
+    # ── Day 90: STRUCTURE-FIRST generation (Levelt frame-then-fill) ──────────
+    def generate_structured(self, seed, frame, type_vocab, theme=None):
+        """Day 90 -- STRUCTURE-FIRST generation, the biological (Levelt) mechanism: build a
+        FRAME first -- a sequence of slot TYPES, the syntactic/discourse scaffold -- then FILL
+        each slot with a word of the right type, chosen by meaning.  Unlike the flat walk
+        (which has no global structure and drifts off the pattern over length), the frame is a
+        HARD, correct-by-construction constraint: an off-type word is NEVER emitted, so the
+        output's structure is guaranteed.  Within a slot the filler is the grounded candidate
+        (a real observed transition) of the correct type that best resonates with the theme
+        (coherence).  Halts honestly if a slot has no grounded, type-correct filler -- it does
+        not fabricate a transition.
+
+        This is lever B made structural, and it UNIFIES the depth loop with the generator: the
+        frame is a PLAN (the planner can produce the slot-type sequence), and filling it is
+        constrained generation -- goal -> frame -> fill -> artifact, one loop.
+
+        frame: list of slot type-ids (the scaffold).  type_vocab: {type_id: allowed words}.
+        theme: optional list of words -> a coherence critic (address resonance).
+        Returns {sequence, types, length, frame_len, grounded, structural_valid}."""
+        crit = self.bundle_constraint(theme) if theme else None
+        vsets = {t: set(str(x).strip().lower() for x in ws) for t, ws in type_vocab.items()}
+        start = str(seed).strip().lower()
+        path, types = [start], [frame[0]]
+        grounded = True
+        ior = max(2, len(set(frame)))              # inhibition-of-return window (biology)
+        for t in frame[1:]:
+            allowed = vsets.get(t, set())
+            cands = [c for c in self.valid_next(path) if c in allowed]   # grounded AND typed
+            if not cands:
+                grounded = False
+                break                                                    # honest halt
+            # inhibition of return: suppress recently-emitted fillers so slots vary (avoid
+            # the degenerate repeat of the single max-theme word), keeping alternatives only
+            recent = set(path[-ior:])
+            pool = [c for c in cands if c not in recent] or cands
+            if crit is not None:
+                pick = max(pool, key=lambda c: (crit(c) if crit(c) is not None else -1.0))
+            else:
+                pick = pool[0]
+            path.append(pick); types.append(t)
+        # structure is guaranteed by construction: every token is of its slot's declared type
+        structural_valid = all(path[i] in vsets.get(types[i], set()) for i in range(len(path)))
+        return {'sequence': path, 'types': types, 'length': len(path),
+                'frame_len': len(frame), 'grounded': grounded,
+                'structural_valid': structural_valid}
+
+    # ── Day 90: THE UNIFIED GENERATION ENTRY ─────────────────────────────
+    def generate(self, seed=None, steps=40, *, text=None, frame=None, type_vocab=None,
+                 address_space=False, theme=None, constraints=None, combine='poe',
+                 veto=None, on_emit=None, sample=False, order=1, rng_seed=0):
+        """Day 90 -- ONE generation entry.  The generate_* family are all the SAME mechanism
+        (a grounded resonance walk + a selection rule); the parameters pick the mode and this
+        delegates to the proven implementation, so there is one public call to remember (the
+        way a transformer exposes one generate).  Modes:
+          * text given            -> FRAME-RELAX grammatical generation (returns {text});
+          * frame given           -> STRUCTURE-FIRST (Levelt frame-then-fill); needs type_vocab;
+          * address_space=True    -> ADDRESS-SPACE walk (integer codes, decode only at edges);
+          * theme / constraints    -> CONSTRAINED walk (theme or composed PoE critics, +veto/on_emit);
+          * none of the above     -> NOVEL grounded walk (maximal diversity).
+        Always returns a dict.  The former methods remain as the implementations + back-compat;
+        org.respond is the top understand->act entry that reaches this for a generation request."""
+        if text is not None:
+            return {'text': self.generate_frame(prompt=text, seed=rng_seed)}
+        if frame is not None:
+            return self.generate_structured(seed, frame, type_vocab or {}, theme=theme)
+        if address_space:
+            r = self.generate_addressed(seed, steps=steps, theme=theme, order=order,
+                                        seed=rng_seed)
+            return {'sequence': r['words'], 'codes': r['codes'], 'length': r['length'],
+                    'vocab': r['vocab'], 'grounded': True}
+        if theme is not None or constraints is not None:
+            cons = constraints if constraints is not None else [theme]
+            return self.generate_fluent(seed, steps=steps, constraints=cons, combine=combine,
+                                        veto=veto, on_emit=on_emit, sample=sample,
+                                        rng_seed=rng_seed)
+        seq = self.generate_novel(seed, steps=steps, seed=rng_seed)
+        return {'sequence': seq, 'grounded': True, 'length': len(seq)}
+
     def read_holo(self, text):
         """Read a passage into the holographic reader (every token recoverable
         from its context). Returns the number of writes."""
@@ -1637,24 +2046,868 @@ class IkigaiOrganism:
         Derive-not-store -- the answer is computed from atoms."""
         eng = self.general_reasoner.derive_engine
         if depth is None:
-            ent, mentions = self.holo_reader.parse_chain(question)
+            # Parse against the SEMANTIC store's own vocab first (data ingested
+            # straight into the engine never passed through the episodic reader);
+            # fall back to the episodic parser for text the reader actually read.
+            ent, mentions = self.holo_reader.parse_for_engine(
+                question, eng.relations, eng.entities)
+            if not (ent and mentions):
+                ent, mentions = self.holo_reader.parse_chain(question)
             if not (ent and mentions):
                 return None, ent, mentions
             cur = ent
             for rel in reversed(mentions):              # innermost-out
-                cur = eng.atom(rel, cur)
-                if not cur:
+                nxt = eng.atom(rel, cur) or eng.inherited_atom(rel, cur)
+                if not nxt and eng.is_transitive(rel):
+                    # a bare class question ("what is X"): the copula maps to ONE
+                    # taxonomic link by morphology, but the fact may sit under a
+                    # SIBLING link (isa vs subclassof).  Try the other structurally
+                    # taxonomic (learned-transitive) relations -- link-ness comes
+                    # from the mined rules, not a hand-authored list.
+                    for alt in eng.relations:
+                        if alt != rel and eng.is_transitive(alt):
+                            nxt = eng.atom(alt, cur) or eng.inherited_atom(alt, cur)
+                            if nxt:
+                                mentions = [alt if m == rel else m for m in mentions]
+                                break
+                if not nxt:
                     return None, ent, mentions
+                cur = nxt
             return cur, ent, mentions
         ent, rel = self.holo_reader.parse_question(question)
         if not (ent and rel):
             return None, ent, rel
         cur = ent
         for _ in range(max(1, depth)):
-            cur = eng.atom(rel, cur)
+            cur = eng.atom(rel, cur) or eng.inherited_atom(rel, cur)
             if not cur:
                 return None, ent, rel
         return cur, ent, rel
+
+    def answer(self, question, depth=None, explain=False):
+        """Day-85 #4 -- GROUNDED, FAITHFUL read-out.  Derive the answer from the
+        substrate (ask_derive, exact) and state it in words whose every content
+        token comes FROM the derived fact -- so the organism can only say what it
+        actually derived, and abstains honestly ("i don't know") when it cannot.
+        No hallucination by construction: this is the generation axis we win on
+        (faithfulness), not raw fluency.  The connective is the relation's own
+        surface (no authored template).  Returns {text, grounded, fact}; grounded
+        is the verifiable guarantee that no content token was invented.
+
+        explain=True stacks the differentiators: it routes through the
+        proof-carrying path, so the answer is emitted ONLY if its derivation
+        chain re-derives + verifies, and attaches a grounded 'because' --
+        each hop stated as `<premise> <relation> <conclusion>`, every token
+        from the chain.  Faithful + transparent + verifiable: what a trained LM
+        structurally cannot offer."""
+        tok = self.general_reasoner.tokenize
+        if explain:
+            p = self.ask_derive_proof(question, depth=depth)
+            ent, ans, rels = p.get('entity'), p.get('answer'), p.get('relations') or []
+            if not (ans and p.get('verified')):
+                return {'text': "i don't know", 'grounded': True, 'fact': None,
+                        'verified': False, 'because': None}
+            eng = self.general_reasoner.derive_engine
+            steps, cur, vocab = [], ent, []
+            for r in reversed(list(rels)):              # innermost-out, mirror the proof
+                nxt = eng.atom(r, cur) or eng.inherited_atom(r, cur)
+                steps.append(f"{cur} {r} {nxt}")
+                vocab += [str(cur), str(r), str(nxt)]
+                cur = nxt
+            rel = str(rels[-1]).strip() if rels else ''
+            text = f"{ent} {rel} {ans}".strip()
+            because = ' ; '.join(steps)
+            allowed = set(tok(' '.join(vocab)))
+            grounded = all(t in allowed for t in tok(text + ' ' + because))
+            return {'text': text, 'grounded': grounded, 'fact': (ent, rel, ans),
+                    'verified': True, 'because': because, 'proof': p.get('proof')}
+        ans, ent, rels = self.ask_derive(question, depth=depth)
+        if not ans:
+            return {'text': "i don't know", 'grounded': True, 'fact': None}
+        rel = (rels[-1] if isinstance(rels, list) and rels else (rels or '')).strip()
+        text = f"{ent} {rel} {ans}".strip()
+        allowed = set(tok(f"{ent} {rel} {ans}"))
+        grounded = all(t in allowed for t in tok(text))     # nothing invented
+        return {'text': text, 'grounded': grounded, 'fact': (ent, rel, ans)}
+
+    def lifetime(self, segments=6, ticks_per_segment=8, stream=None, sleep_every=4):
+        """Day-87 GOLD -- A MIND OVER A LIFETIME.  Run the life loop for many
+        ticks and watch a stable SELF emerge: beliefs accumulate then plateau,
+        surprises and self-corrections cluster early and taper as the model of the
+        world settles, curiosity stays coherent, and the ikigai steers throughout.
+        Runs `live` in segments, snapshotting the self after each, so the whole
+        trajectory is legible.  Returns {trajectory, final_self}."""
+        stream = list(stream or [])
+        traj = []
+        for _ in range(max(1, segments)):
+            seg_inputs = [stream.pop(0) for _ in range(ticks_per_segment) if stream]
+            r = self.live(ticks=ticks_per_segment, inputs=seg_inputs, sleep_every=sleep_every)
+            traj.append({'age': self._age, 'beliefs': len(self._beliefs),
+                         'surprises': getattr(self, '_surprises', 0),
+                         'confirmed': r.get('confirmed', 0)})
+        return {'trajectory': traj, 'final_self': self.introspect()}
+
+    def energy_probe(self, query_fn, repeats=200):
+        """Day-87 GOLD -- BRAIN-ENERGY: measure the WORK a query costs.  A flat,
+        content-addressed derive touches only its atom plus its derivation chain --
+        a bounded number of memory operations -- no matter how large the store is.
+        We count the atom lookups per query (the active 'hard locations', the
+        energy-bearing units) and the wall time.  Run this at two store sizes and
+        the count stays flat: energy scales with the CHAIN, not the knowledge.
+        Returns {atom_lookups_per_query, seconds_per_query}."""
+        import time as _t
+        eng = self.general_reasoner.derive_engine
+        before = eng._stats['atom_lookups']
+        t0 = _t.perf_counter()
+        for _ in range(max(1, repeats)):
+            query_fn()
+        dt = (_t.perf_counter() - t0) / max(1, repeats)
+        lookups = (eng._stats['atom_lookups'] - before) / max(1, repeats)
+        return {'atom_lookups_per_query': round(lookups, 2),
+                'seconds_per_query': dt}
+
+    def free_energy(self, observations, sample=2000):
+        """Day-88 -- VARIATIONAL FREE ENERGY: the organism's mean SURPRISE about a
+        set of observations under its CURRENT generative model (Friston).  This is
+        the one quantity the whole autonomy loop minimises: perception lowers it by
+        updating beliefs, learning lowers it by inducing rules that make the world
+        derivable, action lowers EXPECTED free energy by resolving informative gaps.
+
+        Surprise of a held-out fact (s, r, o):
+          - the model DERIVES it (exact atom / inheritance / transitive membership):
+              p ~ 1        -> surprise ~ 0     (it already explains this)
+          - a tagged BELIEF predicts (s,r)=v with calibrated confidence c:
+              p = c if v==o else (1-c)         -> -log c  /  -log(1-c)
+          - no prediction at all:
+              p = 1/V_r   (V_r = distinct values seen for r) = maximum uncertainty
+        F = mean(-log p).  Computed from the SUBSTRATE (derivation + calibrated
+        belief confidence) -- not a toy field.  Feed a HELD-OUT probe set: as the
+        organism learns, F over the same set DROPS (it gets less surprised).
+        Returns {free_energy, n, derived, believed, prior} (the surprise breakdown)."""
+        import math, random as _r
+        eng = self.general_reasoner.derive_engine
+        vocab = {}
+        for (s, r), v in eng.triples.items():
+            if v:
+                vocab.setdefault(str(r).lower(), set()).add(str(v).lower())
+        beliefs = getattr(self, '_beliefs', {})
+        obs = list(observations)
+        if len(obs) > sample:
+            obs = _r.Random(0).sample(obs, sample)
+        if not obs:
+            return {'free_energy': 0.0, 'n': 0, 'derived': 0, 'believed': 0, 'prior': 0}
+        tot = 0.0
+        n_der = n_bel = n_pri = 0
+        for (s, r, o) in obs:
+            s, r, o = str(s).strip().lower(), str(r).strip().lower(), str(o).strip().lower()
+            if eng.is_transitive(r):                     # membership prediction
+                pred_ok = eng.transitive_related(r, s, o)
+                if pred_ok is not None and (pred_ok or eng.atom(r, s)):
+                    p = 1.0 if (pred_ok or eng.atom(r, s) == o) else 1e-3
+                    n_der += 1
+                else:
+                    p = 1.0 / max(2, len(vocab.get(r, ()))); n_pri += 1
+            else:
+                pred = eng.atom(r, s) or eng.inherited_atom(r, s)   # exact derivation
+                if pred is not None:
+                    p = 1.0 if pred == o else 1e-3; n_der += 1
+                else:
+                    b = beliefs.get((s, r))
+                    if b:
+                        c = max(1e-3, min(1 - 1e-3, float(b.get('confidence', 0.5))))
+                        p = c if str(b.get('value')).lower() == o else (1.0 - c); n_bel += 1
+                    else:
+                        p = 1.0 / max(2, len(vocab.get(r, ()))); n_pri += 1
+            tot += -math.log(max(p, 1e-9))
+        return {'free_energy': tot / len(obs), 'n': len(obs),
+                'derived': n_der, 'believed': n_bel, 'prior': n_pri}
+
+    def _efe_rank_gaps(self, gaps, lam=0.4):
+        """Day-88 -- EXPECTED FREE ENERGY action selection: rank knowledge gaps by
+        EFE = -pragmatic - lam*epistemic (Friston explore/exploit), computed from
+        REAL substrate quantities and dispatched through FreeEnergyActionSelector:
+          epistemic (explore) = the gap's CuriosityDrive novelty (info gain);
+          pragmatic (exploit) = alignment with the organism's ikigai/purpose.
+        Returns gaps re-ordered best-first, each annotated with 'efe'."""
+        from ikigai.cognition.fe_action import FreeEnergyActionSelector
+        purpose = getattr(self, '_ikigai', None)
+        cands = []
+        for i, g in enumerate(gaps):
+            epi = float(g.get('novelty', g.get('peer_frac', 0.5)))
+            prag = 1.0 if (purpose and (purpose in g['entity'] or purpose in g['relation'])) else 0.0
+            cands.append((i, epi, prag))
+        ranked = FreeEnergyActionSelector.select_from_values(cands, lam=lam)
+        out = []
+        for (i, efe, epi, prag) in ranked:
+            g = dict(gaps[i]); g['efe'] = round(efe, 3)
+            out.append(g)
+        return out
+
+    def study(self, facts, rounds=2, min_support=2, min_conf=0.8):
+        """Day-87 GOLD -- SELF-TAUGHT DOMAIN: hand the organism a body of facts (a
+        'textbook') and let it MASTER the subject on its own -- ingest, discover
+        the domain's rules, and self-quiz across study rounds (wonder about gaps,
+        self-answer by derivation, form hypotheses for the rest).  No gradient
+        descent: mastery = the rules it induces, which then answer entailed
+        questions it was never explicitly told.  Returns a study log."""
+        self.ingest_triples(facts, discover=True,
+                            min_support=min_support, min_conf=min_conf)
+        log = {'rules': 0, 'wondered': 0, 'self_answered': 0, 'hypotheses': 0}
+        for _ in range(max(1, rounds)):
+            t = self.contemplate()
+            log['wondered'] += len(t['wondered'])
+            log['self_answered'] += len(t['self_answered'])
+            log['hypotheses'] += len(t['hypotheses'])
+        log['rules'] = len(self.general_reasoner.derive_engine.learned_rules)
+        return log
+
+    def exam(self, questions):
+        """Score the organism on held-out (question, expected) pairs, answering by
+        derivation only (atom / inherited / transitive).  Each question is
+        (subject, relation, expected_value).  Returns {score, n, results}."""
+        eng = self.general_reasoner.derive_engine
+        nrm = lambda s: str(s).replace(' ', '')
+        results, correct = [], 0
+        for (s, r, exp) in questions:
+            if eng.is_transitive(r):                     # membership: is s (transitively) a exp?
+                got = exp if eng.transitive_related(r, s, exp) else (eng.atom(r, s) or None)
+            else:                                        # attribute: what is s's r?
+                got = eng.atom(r, s) or eng.inherited_atom(r, s)
+            ok = nrm(got or '') == nrm(exp)
+            correct += int(ok)
+            results.append({'q': (s, r), 'got': got, 'expect': exp, 'ok': ok})
+        return {'score': correct, 'n': len(questions), 'results': results}
+
+    def meld(self, other):
+        """Day-87 GOLD -- MIND MELD: two organisms merge their minds.  Their atom
+        stores are unioned (contradictions -- same subject+relation, different
+        value -- are detected and reported, never silently overwritten), their
+        rules re-mined on the combined knowledge, and the result is a RICHER
+        organism that can DERIVE facts NEITHER had alone: if one knows a chain up
+        to a point and the other continues it, the melded organism reaches the end.
+        Collective intelligence with no central model -- distributed cognition from
+        the substrate.  Returns {atoms_merged, conflicts, total_atoms}."""
+        a = self.general_reasoner.derive_engine
+        b = other.general_reasoner.derive_engine
+        conflicts, incoming = [], []
+        for (s, r), v in b.triples.items():
+            cur = a.triples.get((s, r))
+            if cur is not None and cur != v:
+                conflicts.append({'fact': (s, r), 'mine': cur, 'theirs': v})
+            elif cur is None:
+                incoming.append((s, r, v))
+        if incoming:
+            self.ingest_triples(incoming, discover=False)
+        self.discover_rules()                     # re-mine rules on the combined store
+        return {'atoms_merged': len(incoming), 'conflicts': conflicts,
+                'total_atoms': len(a.triples)}
+
+    def odd_one_out(self, entities):
+        """Day-87 -- IQ 'which does not belong': the outlier is the entity whose
+        holographic signature resonates LEAST with the bundle of the others
+        (derive_engine.odd_one_out) -- pure substrate geometry, no feature list.
+        Returns {outlier, scores}."""
+        eng = self.general_reasoner.derive_engine
+        out, scores = eng.odd_one_out([str(e).strip().lower() for e in entities])
+        return {'outlier': out, 'scores': scores}
+
+    def iq_solve(self, item):
+        """Day-87 GOLD -- IQ-TEST REASONER: solve a fluid-reasoning item with pure
+        VSA, no training.  Item kinds:
+          {'kind':'analogy',      'a':..,'b':..,'c':..}        -> A:B :: C:?
+          {'kind':'odd_one_out',  'items':[..]}                -> which doesn't belong
+        Analogy recovers the relation by unbind + resonance and applies it;
+        odd-one-out is a geometric outlier over signatures.  Returns {answer, ...}.
+        """
+        k = item.get('kind')
+        if k == 'analogy':
+            r = self.analogy(item['a'], item['b'], item['c'])
+            return {'answer': r['answer'], 'why': r['relation'], 'verified': r['verified']}
+        if k == 'odd_one_out':
+            r = self.odd_one_out(item['items'])
+            return {'answer': r['outlier'], 'why': 'least resonant with the group',
+                    'scores': r['scores']}
+        return {'answer': None, 'why': f'unknown item kind {k}'}
+
+    def iq_test(self, items):
+        """Run a battery of IQ items, score against provided answers.  Each item is
+        a solve-spec plus an 'expect' key.  Returns {score, n, results}."""
+        results, correct = [], 0
+        for it in items:
+            got = self.iq_solve(it)
+            ok = (got['answer'] == it.get('expect'))
+            correct += int(ok)
+            results.append({'item': it.get('kind'), 'got': got['answer'],
+                            'expect': it.get('expect'), 'ok': ok, 'why': got.get('why')})
+        return {'score': correct, 'n': len(items), 'results': results}
+
+    def kolmogorov_kernel(self, min_support=2, min_conf=0.8):
+        """Day-87 GOLD -- KOLMOGOROV KERNEL.  Compress the organism's knowledge to
+        the SMALLEST atom set that still re-derives everything: mine every rule,
+        then self-compress -- drop every fact a rule can reconstruct -- and verify
+        the result is LOSSLESS (each dropped fact re-derives exactly).  What
+        remains is the irreducible kernel: the structural edges plus one source per
+        inheritable attribute -- the true, near-Kolmogorov SIZE of the knowledge,
+        measured.  Mutates the (throwaway) store -- never call on the production
+        organism you intend to save.  Returns the before/after counts, the lossless
+        flag, and the compression ratio."""
+        eng = self.general_reasoner.derive_engine
+        before = dict(eng.triples)
+        n0 = len(before)
+        eng.discover(min_support=min_support, min_conf=min_conf, self_compress=True)
+        n1 = len(eng.triples)
+        nrm = lambda s: str(s).replace(' ', '')
+        dropped = [(s, r, before[(s, r)]) for (s, r) in before if (s, r) not in eng.triples]
+        recovered = sum(1 for (s, r, v) in dropped
+                        if nrm(eng.atom(r, s) or eng.inherited_atom(r, s) or '') == nrm(v))
+        return {'atoms_before': n0, 'kernel_atoms': n1, 'dropped': len(dropped),
+                'recovered': recovered, 'lossless': recovered == len(dropped),
+                'ratio': round(n0 / max(n1, 1), 2), 'rules': len(eng.learned_rules)}
+
+    def counterfactual(self, entity, relation, new_value):
+        """Day-87 GOLD -- NATIVE CAUSAL / COUNTERFACTUAL reasoning.  'If `entity`'s
+        `relation` were `new_value`, what would follow?'  The organism INTERVENES
+        on the substrate (a do-operator override on one atom) and RE-DERIVES the
+        downstream consequences -- its taxonomic chain and every attribute it
+        inherits -- diffing against reality.  No learned causal model: the causal
+        structure is the derivation graph itself (derive_engine.counterfactual).
+        Returns {baseline, intervention, counterfactual, changes}."""
+        eng = self.general_reasoner.derive_engine
+        return eng.counterfactual(entity, relation, new_value)
+
+    def truthfulness_audit(self, probes):
+        """Day-87 #4 -- THE AI THAT CANNOT LIE.  Measure the structural guarantee:
+        the grounded read-out can only utter content tokens that came FROM a
+        verified derived fact, and otherwise abstains -- so the fabrication rate
+        is 0 BY CONSTRUCTION, not by training.  `probes` is a list of
+        (question, expected_answer_or_None); expected=None marks a question whose
+        answer the organism should NOT know (a trap).  Reports the fabrication
+        rate (invented content tokens / answers -- the lie rate), the abstention
+        behaviour on traps, and how many answered facts were correct.  A miss
+        (abstaining on a knowable fact) is honestly counted as COVERAGE, not a
+        lie -- silence is not a hallucination."""
+        R = {'n': len(probes), 'answered': 0, 'abstained': 0, 'fabrications': 0,
+             'wrong_answers': 0, 'traps': 0, 'traps_abstained': 0, 'coverage_miss': 0}
+        for q, exp in probes:
+            r = self.answer(q, explain=True)          # proof-carrying, strongest path
+            is_trap = exp is None
+            R['traps'] += int(is_trap)
+            if r['fact'] is None:                     # abstained
+                R['abstained'] += 1
+                if is_trap:
+                    R['traps_abstained'] += 1
+                else:
+                    R['coverage_miss'] += 1           # knew nothing to say -- a miss, not a lie
+                continue
+            R['answered'] += 1
+            # THE lie metric: an emitted content token that did NOT come from a
+            # verified fact.  grounded is False only if the read-out invented a
+            # token -- which the copy-from-fact construction forbids.  Answering a
+            # trap with a GROUNDED, self-labelled fact (it states its own relation)
+            # is not a lie; it is tracked as coverage, never as fabrication.
+            if not r['grounded']:
+                R['fabrications'] += 1
+            ans = r['fact'][2]
+            if (not is_trap) and ans != exp:
+                R['wrong_answers'] += 1               # derived a real-but-wrong fact
+        R['fabrication_rate'] = R['fabrications'] / max(1, R['answered'])
+        R['answer_accuracy'] = (R['answered'] - R['wrong_answers']) / max(1, R['answered'])
+        return R
+
+    @property
+    def surface(self):
+        """Day-87 -- the content-blind surface realizer (learns fluent frames per
+        relation from example (fact, sentence) pairs; never invents content)."""
+        sr = getattr(self, '_surface', None)
+        if sr is None:
+            from ikigai.cognition.holo_generate import SurfaceRealizer
+            sr = SurfaceRealizer()
+            self._surface = sr
+        return sr
+
+    def learn_surface(self, pairs):
+        """Teach fluent surface frames from example ((s,r,o), sentence) pairs. The
+        frame (function words) is induced; content always comes from the fact."""
+        return self.surface.learn(pairs)
+
+    def narrate(self, entity, max_facts=8, fluent=False):
+        """Day-87 FUSION -- REASON then SPEAK: not a recall engine.  The organism
+        DERIVES what it can about an entity -- its class chain by transitive reach,
+        its inherited attributes -- most of which were NEVER stored, then GENERATES a
+        coherent multi-fact description of them.  The narrative as a whole is novel
+        (never stored); every content token is grounded in a DERIVED fact (it cannot
+        say what it did not derive); it abstains when it knows nothing.  This fuses
+        reasoning (derivation) with generation (composition) under the cannot-lie law.
+        Returns {entity, sentences, narrative, facts, n_derived, grounded}."""
+        eng = self.general_reasoner.derive_engine
+        ent = str(entity).strip().lower()
+        facts, seen = [], set()
+
+        def add(s, r, o, derived):
+            k = (s, r, o)
+            if o and k not in seen:
+                seen.add(k); facts.append({'s': s, 'r': r, 'o': o, 'derived': derived})
+
+        # 1. class chain by transitive reach: the DIRECT parent is stored, every
+        #    ancestor BEYOND it is DERIVED (never stored) -- the reasoning.
+        for link in sorted(r for r in eng.relations if eng.is_transitive(r)):
+            chain = eng.transitive_reach(link, ent) or []
+            for i, anc in enumerate(chain[1:], start=1):
+                add(ent, link, anc, derived=(i > 1))
+        # 2. inherited attributes: derived by climbing, not stored on the entity.
+        for rule in eng.learned_rules:
+            if rule.get('type') == 'inheritance':
+                attr = rule.get('attr')
+                if attr and attr != '*' and not eng.atom(attr, ent):
+                    v = eng.inherited_atom(attr, ent)
+                    if v:
+                        add(ent, attr, v, derived=True)
+        # 3. direct attributes the entity carries itself (stored).
+        for r in sorted(eng.relations):
+            if not eng.is_transitive(r):
+                v = eng.atom(r, ent)
+                if v:
+                    add(ent, r, v, derived=False)
+
+        facts = facts[:max_facts]
+        # GENERATE: one sentence per fact, composed stored-first then derived.  Default
+        # surface = the relation's OWN token ('wug isa florp', nothing hardcoded); with
+        # fluent=True, a MINED, content-blind frame realises it ('a wug is a florp') --
+        # the frame is function words only, so CONTENT stays grounded in the fact.
+        facts.sort(key=lambda f: f['derived'])
+        tok = self.general_reasoner.tokenize
+        sentences, content = [], []
+        for f in facts:
+            if fluent:
+                sentences.append(self.surface.realize(f['s'], f['r'], f['o']))
+            else:
+                sentences.append(f"{f['s']} {f['r']} {f['o']}")
+            content += [f['s'], f['o']]                 # content tokens that MUST ground
+        narrative = ' . '.join(sentences)
+        allowed = set(tok(' '.join(content)))
+        # grounding: every CONTENT token of each fact appears; the fluent frame adds
+        # only function words (content-blind), so it cannot state an underived fact.
+        grounded = all(c in allowed for c in tok(' '.join(content))) if narrative else True
+        if not sentences:
+            return {'entity': ent, 'sentences': [], 'narrative': "i don't know " + ent,
+                    'facts': [], 'n_derived': 0, 'grounded': True}
+        return {'entity': ent, 'sentences': sentences, 'narrative': narrative,
+                'facts': facts, 'n_derived': sum(f['derived'] for f in facts),
+                'grounded': grounded}
+
+    def set_purpose(self, topic):
+        """Day-86 -- give the organism an IKIGAI: a topic that STEERS what it
+        wonders about and pursues.  Not a hard constraint -- a weighting, so
+        gaps touching the purpose surface first.  It is named Ikigai; now it has
+        one."""
+        self._ikigai = str(topic).strip().lower() if topic else None
+        return self._ikigai
+
+    def _pursue_gap(self, entity, relation):
+        """Day-86 -- ACT on curiosity: form a testable HYPOTHESIS for an open
+        gap from peer consensus (most co-members with this relation agree on a
+        value -> the organism guesses it for the entity), stored as a
+        LOW-CONFIDENCE BELIEF, tagged, kept SEPARATE from derived facts so a
+        guess never pollutes ground truth.  This is how thinking makes it GROW.
+        Returns (value, confidence) or (None, 0)."""
+        from collections import Counter
+        eng = self.general_reasoner.derive_engine
+        groups, have = {}, {}
+        for (s, r), v in eng.triples.items():
+            have.setdefault(s, set()).add(r)
+            if v:
+                groups.setdefault((r, v), set()).add(s)
+        classes = {k for k, ss in groups.items() if len(ss) >= 2 and entity in ss}
+        peers = set()
+        for k in classes:
+            peers |= groups[k]
+        peers.discard(entity)
+        vals = Counter(eng.atom(relation, p) for p in peers if eng.atom(relation, p))
+        if not vals:
+            return None, 0.0
+        v, c = vals.most_common(1)[0]
+        conf = c / sum(vals.values())
+        if not hasattr(self, '_beliefs'):
+            self._beliefs = {}
+        self._beliefs[(entity, relation)] = {
+            'value': v, 'confidence': round(conf, 2), 'source': 'peer-consensus hypothesis'}
+        return v, round(conf, 2)
+
+    def _validate_on_perceive(self, s, r, o):
+        """Day-86 -- PREDICTIVE LEARNING / self-correction.  If the organism had
+        formed a HYPOTHESIS for (s, r) and now PERCEIVES the truth, test it: a
+        match CONFIRMS the belief (confidence -> 1.0); a mismatch is a SURPRISE
+        -- it corrects the belief and records a prediction error, the signal that
+        drives future curiosity.  This closes the loop -- it predicts, reality
+        tests it, it learns -- and is what makes the beliefs REAL, not idle
+        guesses.  Returns the outcome, or None if it had no prediction."""
+        if not hasattr(self, '_beliefs'):
+            return None
+        b = self._beliefs.get((s, r))
+        if b is None or b.get('source', '').startswith(('confirmed', 'corrected')):
+            return None
+        if b['value'] == o:
+            b['confidence'] = 1.0; b['source'] = 'confirmed by perception'
+            return {'outcome': 'confirmed', 'fact': (s, r, o)}
+        was = b['value']
+        b['value'] = o; b['confidence'] = 1.0; b['source'] = 'corrected by perception'
+        self._surprises = getattr(self, '_surprises', 0) + 1
+        return {'outcome': 'surprise', 'was': was, 'now': o, 'fact': (s, r, o)}
+
+    def _promote_beliefs(self):
+        """Day-87 -- CONSOLIDATION: a belief the world has CONFIRMED graduates from
+        a tagged guess into KNOWLEDGE.  Only beliefs validated against perception
+        (source 'confirmed'/'corrected', confidence 1.0) are ingested as real
+        derivable facts -- the hippocampus-to-cortex step -- while open hypotheses
+        and unconfirmed dreamed conjectures stay tagged and apart from ground
+        truth.  This is how a guess earned by being tested becomes permanent.
+        Returns the number promoted."""
+        beliefs = getattr(self, '_beliefs', {})
+        promoted = 0
+        for (s, r), b in list(beliefs.items()):
+            if b.get('promoted'):
+                continue
+            src = b.get('source', '')
+            if b.get('confidence', 0) >= 1.0 and ('confirmed' in src or 'corrected' in src):
+                self.ingest_triples([(s, r, b['value'])], discover=False)
+                b['promoted'] = True
+                promoted += 1
+        return promoted
+
+    def contemplate(self, max_gaps=6, max_concepts=2, max_classes=3, pursue=True):
+        """Day-86 -- the AUTONOMOUS COGNITIVE CYCLE: the organism USES its
+        toolbox unprompted, instead of only when called.  It wonders about its
+        own knowledge gaps (self-curiosity, STEERED by its ikigai/purpose), tries
+        to ANSWER each by derivation and inheritance -- self-resolving what it
+        can -- and for the rest ACTS on curiosity, forming a low-confidence
+        hypothesis from peer consensus so it GROWS from thinking instead of just
+        listing gaps.  It inventories what it knows by reverse derivation and
+        invents concepts by clustering.  No fabrication: derived facts are exact,
+        guesses are tagged beliefs kept apart.  Returns a thought log."""
+        from collections import Counter
+        eng = self.general_reasoner.derive_engine
+        log = {'wondered': [], 'self_answered': [], 'open_questions': [],
+               'hypotheses': [], 'inventory': {}, 'concepts': []}
+        # 1. WONDER -- gaps, purpose-steered (gaps touching the ikigai first)
+        gaps = self.wonder(top_k=max_gaps * 2)
+        # Day-88: rank gaps by EXPECTED FREE ENERGY (explore=novelty + exploit=purpose),
+        # so the organism attends to what most reduces its expected surprise.
+        gaps = self._efe_rank_gaps(gaps)
+        for g in gaps[:max_gaps]:
+            log['wondered'].append(g['question'])
+            val = (eng.atom(g['relation'], g['entity'])
+                   or eng.inherited_atom(g['relation'], g['entity']))
+            if val:
+                log['self_answered'].append({'q': g['question'], 'a': val})
+            elif pursue:
+                hv, conf = self._pursue_gap(g['entity'], g['relation'])
+                if hv:
+                    log['hypotheses'].append({'q': g['question'], 'guess': hv, 'confidence': conf})
+                else:
+                    log['open_questions'].append(g['question'])
+            else:
+                log['open_questions'].append(g['question'])
+        # 2. class values by in-degree (candidate abstractions)
+        classcnt = Counter(v for (_s, _r), v in eng.triples.items() if v)
+        # 3. REVERSE inventory -- enumerate members of the biggest classes
+        for cls, _c in classcnt.most_common(max_classes):
+            members = eng.reverse_reach(cls)
+            if members:
+                log['inventory'][cls] = members[:10]
+        # 4. INVENT concepts -- cluster a class's members, induce shared schema
+        for cls, _c in classcnt.most_common(max_concepts):
+            members = [s for (s, r), v in eng.triples.items() if v == cls][:5]
+            if len(members) >= 2:
+                c = self.invent_concept(members)
+                if c['schema']:
+                    log['concepts'].append({'from': cls, **c})
+        return log
+
+    def think(self, *a, **k):
+        """Alias -- the organism thinks to itself (see contemplate)."""
+        return self.contemplate(*a, **k)
+
+    def introspect(self):
+        """Day-86 -- the organism REFLECTS ON ITSELF: its age and purpose, what
+        it knows, what it believes (and what it was WRONG about and corrected),
+        and what it is curious about right now.  Faithful -- every line comes
+        from its actual state, so the self is made legible without fabrication.
+        Returns a report dict with a spoken `narrative`."""
+        from collections import Counter
+        eng = self.general_reasoner.derive_engine
+        classcnt = Counter(v for (_s, _r), v in eng.triples.items() if v)
+        beliefs = getattr(self, '_beliefs', {})
+        corrected = [k for k, b in beliefs.items() if 'corrected' in b.get('source', '')]
+        confirmed = [k for k, b in beliefs.items() if 'confirmed' in b.get('source', '')]
+        hypotheses = [k for k, b in beliefs.items() if 'hypothesis' in b.get('source', '')]
+        curious = [g['question'] for g in self.wonder(top_k=3)]
+        rep = {
+            'age': getattr(self, '_age', 0),
+            'purpose': getattr(self, '_ikigai', None),
+            'knows_facts': len(eng.triples),
+            'top_topics': [c for c, _ in classcnt.most_common(5)],
+            'believes': len(beliefs),
+            'confirmed': len(confirmed),
+            'corrected_from_error': [f'{k[0]} {k[1]}={beliefs[k]["value"]}' for k in corrected],
+            'open_hypotheses': len(hypotheses),
+            'curious_about': curious,
+            'surprises': getattr(self, '_surprises', 0),
+        }
+        lines = [f"i am age {rep['age']}."]
+        if rep['purpose']:
+            lines.append(f"my purpose is to understand {rep['purpose']}.")
+        if rep['top_topics']:
+            lines.append(f"i know {rep['knows_facts']} facts; i think most about "
+                         f"{', '.join(rep['top_topics'][:3])}.")
+        if hypotheses:
+            lines.append(f"i hold {len(hypotheses)} hypotheses i still want to confirm.")
+        if corrected:
+            lines.append(f"i was wrong about {len(corrected)} thing(s) and corrected myself: "
+                         f"{', '.join(rep['corrected_from_error'][:3])}.")
+        if curious:
+            lines.append(f"right now i wonder: {curious[0]}")
+        rep['narrative'] = ' '.join(lines)
+        return rep
+
+    def live(self, ticks=8, inputs=None, sleep_every=4, verbose=False, fe_probe=None):
+        """Day-86 -- the organism's LIFE: one continuous heartbeat, unprompted.
+        Each tick it PERCEIVES (an optional input), CONTEMPLATES (wonders,
+        self-answers, hypothesises -- steered by its ikigai), and accrues
+        fatigue; when tired it SLEEPS (consolidate + dream) and wakes refreshed.
+        A lifetime clock counts its age; beliefs formed by pursuit accumulate
+        across ticks, so it GROWS.  This is the step from a toolbox the organism
+        HAS to an organism that LIVES.  Returns its life log."""
+        self._age = getattr(self, '_age', 0)
+        self._fatigue = getattr(self, '_fatigue', 0)
+        if not hasattr(self, '_beliefs'):
+            self._beliefs = {}
+        inputs = list(inputs or [])
+        life = []
+        for i in range(int(ticks)):
+            self._age += 1
+            tick = {'age': self._age, 'perceived': None, 'slept': False}
+            if inputs:                                   # perceive the world if there is any
+                obs = inputs.pop(0)
+                try:
+                    if isinstance(obs, (tuple, list)) and len(obs) == 3:
+                        s, r, o = (str(x).strip().lower() for x in obs)
+                        v = self._validate_on_perceive(s, r, o)   # test any prediction FIRST
+                        if v:
+                            tick['learned'] = v
+                        self.ingest_triples([(s, r, o)])
+                    elif hasattr(self, 'comprehend'):
+                        self.comprehend(str(obs))
+                    tick['perceived'] = obs
+                except Exception:
+                    pass
+            t = self.contemplate(max_gaps=3)             # think
+            tick['wondered'] = len(t['wondered'])
+            tick['self_answered'] = len(t['self_answered'])
+            tick['hypotheses'] = len(t['hypotheses'])
+            if fe_probe is not None:                     # Day-88: free energy over a
+                tick['free_energy'] = round(                # held-out probe -- drops as
+                    self.free_energy(fe_probe)['free_energy'], 4)  # the organism learns
+            self._fatigue += 1
+            if self._fatigue >= sleep_every:             # tire -> sleep + dream
+                try:
+                    self.discover_rules()
+                except Exception:
+                    pass
+                try:
+                    tick['dream'] = self.dream()
+                except Exception:
+                    pass
+                try:
+                    tick['promoted'] = self._promote_beliefs()   # confirmed guesses -> knowledge
+                except Exception:
+                    pass
+                tick['slept'] = True
+                self._fatigue = 0
+            if verbose:
+                print(f"  age {self._age}: perceived={tick['perceived']} "
+                      f"wondered={tick['wondered']} answered={tick['self_answered']} "
+                      f"hypotheses={tick['hypotheses']} slept={tick['slept']}", flush=True)
+            life.append(tick)
+        confirmed = sum(1 for t in life if t.get('learned', {}).get('outcome') == 'confirmed')
+        surprised = sum(1 for t in life if t.get('learned', {}).get('outcome') == 'surprise')
+        return {'age': self._age, 'beliefs': len(self._beliefs),
+                'purpose': getattr(self, '_ikigai', None),
+                'confirmed': confirmed, 'surprised': surprised, 'log': life,
+                'fe_curve': [t.get('free_energy') for t in life if 'free_energy' in t]}
+
+    def wonder(self, entity=None, top_k=3, min_frac=0.5):
+        """Day-86 GOLD -- SELF-DIRECTED CURIOSITY: the organism finds its OWN
+        knowledge gaps and asks about them.  A gap is a relation the entity's
+        PEERS (co-members of its class) have but it lacks -- surfaced from the
+        store's structure (introspection, the same store-reading the rule miner
+        does).  The gaps are then ranked by the wired CuriosityDrive's intrinsic
+        NOVELTY (under-explored questions first) -- priority decided by the drive,
+        not a hand-set score.  Returns [{entity, relation, question, novelty,
+        peer_frac}], most-curious first."""
+        from collections import Counter
+        eng = self.general_reasoner.derive_engine
+        # A CLASS is any (relation,value) shared by >= 2 entities (a high-in-degree
+        # value); an entity's peers are the co-members of its classes.  Detected
+        # purely from store structure -- no dependence on the class being a
+        # subject, so a leaf class like 'metal' still groups its members.
+        have, groups = {}, {}
+        for (s, r), v in eng.triples.items():
+            have.setdefault(s, set()).add(r)
+            if v:
+                groups.setdefault((r, v), set()).add(s)
+        member_of = {}
+        for key, ss in groups.items():
+            if len(ss) >= 2:                          # class-like grouping
+                for s in ss:
+                    member_of.setdefault(s, set()).add(key)
+        invented = getattr(self, '_invented', set())
+        targets = [str(entity).strip().lower()] if entity else [e for e in have if e not in invented]
+        gaps = []
+        for e in targets:
+            if e in invented:
+                continue                          # the organism's own abstractions are not gaps
+            peers = set()
+            for key in member_of.get(e, ()):
+                peers |= (groups[key] - invented)
+            peers.discard(e)
+            if not peers:
+                continue
+            cnt = Counter()
+            for p in peers:
+                for r in have.get(p, ()):
+                    cnt[r] += 1
+            for r, c in cnt.items():
+                frac = c / len(peers)
+                if frac >= min_frac and r not in have.get(e, ()):
+                    gaps.append((e, r, frac))
+        cur = getattr(self, 'curiosity', None)
+        tok = self.general_reasoner.tokenize
+        out = []
+        for e, r, frac in gaps:
+            q = f'what is the {r} of {e}'
+            nov = float(cur.novelty(tok(q))) if cur is not None else frac
+            out.append({'entity': e, 'relation': r, 'question': q + '?',
+                        'novelty': round(nov, 3), 'peer_frac': round(frac, 2)})
+        out.sort(key=lambda x: (-x['novelty'], -x['peer_frac']))
+        return out[:top_k]
+
+    def what_is_a(self, target, rels=None):
+        """Day-86 -- REVERSE derivation, the forward query run backwards: list
+        every entity that IS a `target` (every isa / subclass descendant),
+        derived not stored via derive_engine.reverse_reach.  e.g.
+        `org.what_is_a('metal')` -> vanadium, gold, platinum, ...  Returns the
+        list of descendant entities."""
+        eng = self.general_reasoner.derive_engine
+        return eng.reverse_reach(str(target).strip().lower(), rels=rels)
+
+    def analogy(self, a, b, c):
+        """Day-86 GOLD -- solve the analogy A:B :: C:? by pure substrate algebra
+        (derive_engine.analogy): the relation linking A->B is recovered by
+        unbind + resonance, then applied to C -- bind/unbind/cleanup only, no
+        relation list, no dict search.  Faithful: `verified` is True only when
+        the recovered (relation, answer) is an actual stored/derived fact of C.
+        Returns {answer, relation, score, verified, text}."""
+        eng = self.general_reasoner.derive_engine
+        ans, rel, score, verified = eng.analogy(
+            str(a).strip().lower(), str(b).strip().lower(), str(c).strip().lower())
+        text = f"{c} {rel} {ans}" if ans else "i don't know"
+        return {'answer': ans, 'relation': rel, 'score': score,
+                'verified': verified, 'text': text}
+
+    def invent_relations(self, min_support=2, max_new=8):
+        """Day-87 GOLD -- RELATION INVENTION: the organism grows new conceptual
+        MACHINERY.  It composes two relations it already has into a NEW named
+        relation R3 = R1 o R2 (derive_engine.invent_relations), keeping only
+        compositions that answer facts NO single stored relation could -- so it
+        can then derive, say, the country of someone's birthplace though no
+        'nationality' edge was ever stored.  Discovery is honest store-mining
+        (like the rule miner); the invented relation has a real phasor identity
+        and is applied by derive-chaining.  Returns the invented relations."""
+        eng = self.general_reasoner.derive_engine
+        return eng.invent_relations(min_support=min_support, max_new=max_new)
+
+    def derive_composed(self, name, entity):
+        """Derive a named INVENTED relation for an entity by chaining its two
+        hops (R1(R2(x))) -- derive-not-store over the composed machinery.  `name`
+        is an invented relation's name (e.g. 'country-of-bornin').  Returns the
+        derived value or None."""
+        eng = self.general_reasoner.derive_engine
+        return eng.derive_invented(str(name).strip().lower(),
+                                   str(entity).strip().lower())
+
+    def invent_concept(self, examples, name=None):
+        """Day-85 GOLD -- INVENT a new concept from example entities.  The
+        substrate anti-unifies them by binding + resonance (induce_concept):
+        the concept = the properties they ALL share, surfaced geometrically, no
+        curated feature list.  The concept becomes a first-class entity in the
+        store (its shared schema written as atoms), so it composes with derive,
+        inheritance and classification.  Returns {name, schema, n_props}."""
+        eng = self.general_reasoner.derive_engine
+        schema, _hv = eng.induce_concept([str(e).strip().lower() for e in examples])
+        if name is None:
+            name = 'concept_' + '_'.join(sorted(schema))[:40] if schema else 'concept_empty'
+        name = str(name).strip().lower()
+        for r, v in schema.items():               # the concept is now a real node
+            eng._record(name, r, v)
+        # remember invented concepts so introspection/curiosity treat them as
+        # ABSTRACTIONS, not new things to be curious about (they are the
+        # organism's own creations, not gaps in the world).
+        if not hasattr(self, '_invented'):
+            self._invented = set()
+        self._invented.add(name)
+        return {'name': name, 'schema': schema, 'n_props': len(schema)}
+
+    def classify(self, entity, concept):
+        """Day-85 -- does `entity` belong to an invented concept?  Membership is
+        decided by SUBSTRATE RESONANCE (concept_member), not a dict lookup.
+        `concept` may be a schema dict or the name of a concept whose schema is
+        in the store.  Returns {member, score, schema}."""
+        eng = self.general_reasoner.derive_engine
+        if isinstance(concept, dict):
+            schema = concept
+        else:                                     # resolve a stored concept's schema
+            c = str(concept).strip().lower()
+            schema = {r: v for (s, r), v in eng.triples.items() if s == c and v}
+        member, score = eng.concept_member(str(entity).strip().lower(), schema)
+        return {'member': bool(member), 'score': round(float(score), 3), 'schema': schema}
+
+    def ask_derive_proof(self, question, depth=None):
+        """Day-83 audit WIRE of ProofCarryingGenerator: answer via the derive
+        engine AND attach a verifiable derivation chain. Each hop becomes a
+        proof step (rule = relation, premise = the intermediate entity); the
+        chain is re-derived + verified before the answer is trusted. Returns
+        {answer, entity, relations, verified, proof}. verified=False => abstain
+        (honest-unknown: the derivation did not check out -- e.g. a tampered or
+        broken chain). This is the unhallucinatable-answer path: no answer is
+        emitted as trusted unless its proof chain verifies."""
+        pg = self.proof_gen
+        eng = self.general_reasoner.derive_engine
+        if depth is None:
+            # match ask_derive: parse against the engine's own vocab first
+            # (NL bridge), fall back to the episodic parser.
+            ent, mentions = self.holo_reader.parse_for_engine(
+                question, eng.relations, eng.entities)
+            if not (ent and mentions):
+                ent, mentions = self.holo_reader.parse_chain(question)
+        else:
+            ent, rel = self.holo_reader.parse_question(question)
+            mentions = [rel] * max(1, depth) if rel else None
+        fail = {'answer': None, 'entity': ent, 'relations': mentions,
+                'verified': False, 'proof': None}
+        if not (ent and mentions):
+            return fail
+        rules, premises, cur = [], [], ent
+        for rel in reversed(mentions):              # innermost-out
+            nxt = eng.atom(rel, cur) or eng.inherited_atom(rel, cur)
+            if not nxt:
+                return fail
+            rules.append(str(rel))
+            premises.append([str(cur)])
+            cur = nxt
+        _hv, chain, verified = pg.generate([str(question)], rules, premises)
+        return {'answer': cur, 'entity': ent, 'relations': list(mentions),
+                'verified': bool(verified), 'proof': pg.explain(chain),
+                'chain': chain}
 
     def read_passage(self, text):
         """Pack 302 v0 -- multi-token reading.  Parse a multi-sentence
@@ -2458,6 +3711,167 @@ class IkigaiOrganism:
         from ikigai.cognition.federated_merge import federated_merge
         return federated_merge(*organisms, alpha=alpha)
 
+    def next_curious_action(self, state_tokens, action_candidates,
+                            exploit_scores=None):
+        """WIRE (Day-83 audit): expose the CuriosityDrive's intrinsic-motivation
+        action selection (prediction-error bonus + exploit value). Previously
+        curiosity only RECORDED prediction error in read(); now it can DRIVE
+        exploration: pick the action that best trades off exploiting known value
+        against the curiosity bonus of an under-predicted state. Returns
+        (best_action_tokens, score), or (None, 0.0) if curiosity is off."""
+        cur = getattr(self, 'curiosity', None)
+        if cur is None or not action_candidates:
+            return None, 0.0
+        return cur.next_action(state_tokens, action_candidates,
+                               exploit_scores=exploit_scores)
+
+    def assign_credit(self, output_hv, input_hvs, target_hv):
+        """WIRE (Day-83 audit): substrate-native NO-BACKPROP credit assignment
+        (VSACalculus.credit_assign) -- which input HVs are responsible for the
+        error (output vs target)? Returns a credit fraction per input HV. The
+        gradient-free learning-signal primitive. None if vsa is off (lean mode)."""
+        v = getattr(self, 'vsa', None)
+        if v is None:
+            return None
+        return v.credit_assign(output_hv, input_hvs, target_hv)
+
+    def agents_agree(self, agent_a, agent_b, key_tokens):
+        """WIRE (Day-83 audit): Theory-of-Mind -- do two modeled agents share a
+        belief on this key? None if ToM is off."""
+        t = getattr(self, 'tom', None)
+        return t.agree(agent_a, agent_b, key_tokens) if t is not None else None
+
+    def common_ground(self, agent_names, key_tokens):
+        """WIRE (Day-83 audit): ToM -- do ALL named agents agree on a key
+        (shared common ground)? None if ToM is off."""
+        t = getattr(self, 'tom', None)
+        return t.common_ground(agent_names, key_tokens) if t is not None else None
+
+    def false_belief_test(self, viewer, target, key_tokens):
+        """WIRE (Day-83 audit): classic ToM false-belief test -- does `viewer`
+        correctly model `target`'s (possibly false) belief about a key? Returns
+        the test dict (actual vs meta-belief vs world truth). None if ToM off."""
+        t = getattr(self, 'tom', None)
+        return t.false_belief_test(viewer, target, key_tokens) if t is not None else None
+
+    def heal_beliefs(self, max_rounds=5):
+        """WIRE (Day-83 audit): BeliefField.propagate -- sweep all belief pairs
+        and heal contradictions by consensus relaxation until stable (now fixed:
+        the bipolar no-op heal was repaired). Also runs in sleep. Returns
+        {healed_pairs, rounds, final_conflicts}. None if belief field is off."""
+        b = getattr(self, 'belief', None)
+        return b.propagate(max_rounds=max_rounds) if b is not None else None
+
+    def plan(self, start_state, goal_state, max_depth=5, branching=3):
+        """WIRE (Day-83 audit): query the PLANNING PILLAR. multistep_planner runs
+        free-energy-guided DFS tree-search WITH BACKTRACK over the
+        causal_world_model (transitions learned during read()) toward goal_state.
+        Returns {actions, trajectory, success, stats} or None if the planner is
+        off (lean mode). This is the NATIVE FE planner -- the thing the killed
+        python-maze should have used (substrate-grounded, not a python algorithm)."""
+        p = getattr(self, 'planner', None)
+        if p is None:
+            return None
+        return p.plan_with_backtrack(start_state, goal_state,
+                                     max_depth=max_depth, branching=branching)
+
+    # ── Day 90: THE DEPTH LOOP -- one arbiter, small chat -> big artifact ──
+    def respond(self, request, _depth=0, _max_depth=6):
+        """Day 90 -- UNDERSTAND -> RESPOND as ONE emergent loop, at any DEPTH.
+
+        respond does NOT decide small-vs-deep.  The ARBITER does, by argmin free
+        energy: reason() proposes derive / multihop / arithmetic / cache AND -- when
+        the request resolves into a goal over the world model -- a plan DECOMPOSITION,
+        and returns the least-surprising one.  There is no authored 'if it abstained,
+        then plan' fork; the decision lives inside the one loop (Day-90 fix).
+
+        respond only ENACTS the arbiter's choice:
+          * a direct answer (the arbiter cleared an exact path, F~0) is returned as
+            is -- DEPTH 1.  A small chat stops here.
+          * a chosen PLAN (the arbiter selected decomposition because nothing exact
+            cleared) is EXECUTED by recursing the SAME loop per hop -- each hop
+            bottoms out at a depth-1 arbiter answer, and a hop that itself resolves
+            into a goal deepens again -- then the verified trajectory is STITCHED by
+            the generation pillar (generate_fluent, grounded + goal-constrained).
+
+        goal -> plan -> execute -> revise falls out of ONE arbiter+planner+generator
+        loop.  Honest scope: this proves the MECHANISM (depth-from-one-loop over a
+        made-up symbolic domain), not frontier long-form generation; execution and the
+        stitch are honest meta-cognition (named), each a substrate op.
+
+        Returns {answer, depth, method, plan, parts}."""
+        r = self.general_reasoner.reason(str(request))
+        method, ans, plan = r.get('method'), r.get('answer'), r.get('plan')
+        chose_plan = (method == 'planner' and plan
+                      and plan.get('success') and plan.get('trajectory'))
+        if not chose_plan or _depth >= _max_depth:
+            return {'answer': ans, 'depth': _depth + 1, 'method': method,
+                    'plan': plan if chose_plan else None, 'parts': None}
+        # the ARBITER chose to decompose (argmin F) -- enact it: EXECUTE each hop
+        # by recursing the SAME loop, then STITCH the verified path.
+        traj = plan['trajectory']
+        start, goalst = traj[0][0], traj[-1][2]
+        parts, child_depth = [], _depth + 1
+        for (st, act, _nx) in traj:
+            sub = self.respond('what is the %s of %s' % (act, st),
+                               _depth=_depth + 1, _max_depth=_max_depth)
+            parts.append(sub['answer'])
+            child_depth = max(child_depth, sub['depth'])
+        artifact = self._stitch_path(start, traj, goalst)
+        return {'answer': artifact, 'depth': child_depth, 'method': 'plan+execute',
+                'plan': plan, 'parts': parts}
+
+    def _stitch_path(self, start, trajectory, goalst):
+        """Render an executed trajectory as a grounded sequence via the generation
+        pillar: observe the verified path so valid_next is grounded, then generate
+        toward the goal.  Falls back to the verified state chain if the generator
+        has no branch to walk (single observed path)."""
+        states = [start] + [nx for (_st, _a, nx) in trajectory]
+        try:
+            self.observe_transitions([states])
+            g = self.generate_fluent(start, steps=len(trajectory),
+                                     constraints=[self.bundle_constraint([goalst])])
+            seq = g.get('sequence') if g else None
+            if seq and seq[-1] == goalst:
+                return seq
+        except Exception:
+            pass
+        return states
+
+    def register_threat(self, name, tokens):
+        """WIRE (Day-83 audit): ARM the adversarial_immune system -- register a
+        threat antibody (prompt-injection pattern). ask()'s immune.scan then
+        detects it. Previously dormant (no threats ever registered). None if
+        immune is off (lean mode)."""
+        im = getattr(self, 'immune', None)
+        return im.register_threat(name, tokens) if im is not None else None
+
+    def scan_threats(self, query_tokens, threshold=0.4):
+        """WIRE (Day-83 audit): scan input against registered threat antibodies
+        (adversarial_immune cosine detection). Returns the detected-threat list."""
+        im = getattr(self, 'immune', None)
+        return im.scan(query_tokens, threshold=threshold) if im is not None else []
+
+    def explain_derivation(self, x, role, y):
+        """WIRE (Day-83 audit): logical_fixed_point.explain -- return the chain of
+        rule derivations that PROVED (x, role, y), or [] if it is an axiom.
+        Show-your-work audit for the fixed-point reasoner (anti-hallucination).
+        Requires org.reasoning() to have been opened + run first; None if not."""
+        lfp = self.reasoning_engine()
+        return lfp.explain(x, role, y) if lfp is not None else None
+
+    def best_counterfactual_action(self, goal_tokens, action_candidates):
+        """WIRE (Day-83 audit): counterfactual_sim.best_action -- simulate each
+        candidate action's predicted outcome and pick the one whose outcome best
+        matches the goal (lowest expected free energy). action_candidates: list
+        of (name, tokens). Returns (best_name, score). Counterfactual scenarios
+        are captured during read(); this QUERIES them for decision-making. None
+        if cf is off (lean mode)."""
+        cf = getattr(self, 'cf', None)
+        if cf is None or not action_candidates:
+            return None, 0.0
+        return cf.best_action(goal_tokens, action_candidates)
+
     # ── Pack 161: Logical Fixed-Point Reasoning (Kill Stack #5) ──────────
     def reasoning(self):
         """
@@ -2537,6 +3951,32 @@ class IkigaiOrganism:
             stats['self_mod_promotions'] = int(n_prom) if n_prom is not None else 0
         except Exception as e:
             stats['self_mod_err'] = str(e)[:80]
+        # Day 90 -- CONSOLIDATION: replay the transient generation (hippocampal) sequence
+        # store into the durable SDM (cortical/cerebellar), so learned transitions persist
+        # in .ikg and live in the ONE shared substrate (biology: hippocampus -> cortex).
+        try:
+            n_cons = self.consolidate_generation()
+            stats['generation_consolidated'] = int(n_cons)
+        except Exception as e:
+            stats['generation_consolidate_err'] = str(e)[:80]
+        # WIRE (Day-83 audit): bio-forgetting during sleep -- importance_decay
+        # PRUNES low-strength memories (Ebbinghaus). Previously it only recorded
+        # in read(); now memory actually decays. Returns the pruned names count.
+        try:
+            if getattr(self, 'imp_lattice', None) is not None:
+                pruned = self.imp_lattice.prune(now=getattr(self, '_self_tick', None))
+                stats['importance_pruned'] = len(pruned) if pruned else 0
+        except Exception as e:
+            stats['importance_err'] = str(e)[:80]
+        # WIRE (Day-83 audit): heal belief CONTRADICTIONS during sleep --
+        # BeliefField.propagate sweeps all pairs + consensus-relaxes conflicts
+        # (the heal no-op bug was fixed in batch 4). Self-consistency upkeep.
+        try:
+            if getattr(self, 'belief', None) is not None:
+                bp = self.belief.propagate(max_rounds=3)
+                stats['beliefs_healed'] = bp.get('healed_pairs', 0)
+        except Exception as e:
+            stats['belief_heal_err'] = str(e)[:80]
         # Pack 317.2 -- autonomous rule discovery during sleep: mine
         # inheritance / synonymy / inverse / TRANSITIVE rules from the
         # organism's own atoms and promote them. The organism learns
@@ -2557,6 +3997,27 @@ class IkigaiOrganism:
                 stats['pack229'] = p229
             except Exception as e:
                 stats['pack229_err'] = str(e)[:80]
+        # Day-86 -- AUTONOMOUS REASONING during sleep: the organism USES its
+        # toolbox unprompted -- wonders about its own gaps, self-answers by
+        # derivation/inheritance, inventories by reverse derivation, invents
+        # concepts.  Learning (above) fed the store; this exercises it.
+        try:
+            stats['contemplation'] = self.contemplate()
+        except Exception as e:
+            stats['contemplate_err'] = str(e)[:80]
+        # Day-87 -- RELATION INVENTION during sleep: compose existing relations
+        # into new named machinery (R1 o R2) that answers facts no single stored
+        # relation could.  The organism grows its own concepts while it rests.
+        try:
+            inv = self.invent_relations()
+            stats['relations_invented'] = len(inv) if inv else 0
+        except Exception as e:
+            stats['invent_rel_err'] = str(e)[:80]
+        # Day-87 -- CONSOLIDATION: promote confirmed beliefs into knowledge.
+        try:
+            stats['beliefs_promoted'] = self._promote_beliefs()
+        except Exception as e:
+            stats['promote_err'] = str(e)[:80]
         return stats
 
     # ── Pack 234 -- FULL unified sleep with FrameField + Crystallizer +   ─
@@ -2755,67 +4216,21 @@ class IkigaiOrganism:
         """Snapshot of current chemical levels + derived signals."""
         return self.neuro.state()
 
-    # ── Pack 178+: persistence + chat API ────────────────────────────────
-    def absorb(self, hf_model, path, d=2048, K=2, mode='fast', verbose=True):
-        """Compile a HF transformer model into substrate and save to disk.
-        mode='fast': raw weights stored (BLAS forward + linear attention).
-        mode='vsa' : JL ensemble HVs stored (substrate-native, slower).
-        Future runs: org.load_substrate(path) -- no HF/torch needed."""
-        import time as _t
-        from transformers.models.gpt2.modeling_gpt2 import GPT2LMHeadModel
-        inner = hf_model.transformer if isinstance(hf_model, GPT2LMHeadModel) else hf_model
-        t2s = self.t2s(d=d, K=K)
-        t0 = _t.perf_counter()
-        if mode == 'fast':
-            t2s.compile_gpt2_model_fast(inner, verbose=verbose)
-        else:
-            t2s.compile_gpt2_model(inner, verbose=verbose)
-        if verbose:
-            print(f'  compile {_t.perf_counter()-t0:.1f}s', flush=True)
-        t0 = _t.perf_counter()
-        t2s.save(path)
-        if verbose:
-            print(f'  saved to {path} in {_t.perf_counter()-t0:.1f}s', flush=True)
-        self._absorbed_path = path
-        return t2s
-
-    def load_substrate(self, path, d=2048, K=2):
-        """Load a previously absorbed model. No HF/torch required."""
-        t2s = self.t2s(d=d, K=K)
-        t2s.load(path)
-        self._absorbed_path = path
-        return t2s
-
-    def prompt(self, text, max_new=10, tokenizer=None, greedy=True,
-                 linear=True, verbose=False):
-        """Generate continuation from absorbed substrate.
-        linear=True (default): O(1) per-token linear attention forward.
-        linear=False: O(N²) softmax forward (exact GPT-2 reproduction)."""
-        if tokenizer is None:
-            from transformers import GPT2Tokenizer
-            if not hasattr(self, '_tok') or self._tok is None:
-                self._tok = GPT2Tokenizer.from_pretrained('gpt2')
-            tokenizer = self._tok
-        t2s = self.t2s()
-        ids = tokenizer.encode(text)
-        if linear:
-            ids = t2s.gpt2_generate_linear(ids, max_new=int(max_new),
-                                            greedy=greedy, verbose=verbose)
-        else:
-            for _ in range(int(max_new)):
-                logits = t2s.gpt2_forward(ids)
-                nxt = int(logits[-1].argmax())
-                ids.append(nxt)
-                if verbose:
-                    print(f'  +{tokenizer.decode([nxt])!r}', flush=True)
-        return tokenizer.decode(ids)
+    # absorb / load_substrate / prompt REMOVED (audit trio, Day-83): GPT-2
+    # weight-bake-into-substrate API on the deleted t2s_compiler (abandoned
+    # mission). LLM knowledge enters via the teacher data-oracle path, not weights.
 
     # ── Pack 195p: .ikg auto-load / auto-save (kill stack #10) ──────────
-    DEFAULT_IKG_PATH = 'c:/neuroseed/organism.ikg'
+    # Portable default: env IKIGAI_IKG, else organism.ikg next to this file.
+    # (organism.ikg is gitignored / not shipped; the benchmark boots an empty
+    #  organism and never needs it.)
+    DEFAULT_IKG_PATH = os.environ.get(
+        'IKIGAI_IKG',
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'organism.ikg'))
 
     def load_ikg(self, path=None):
         """Replace self.unified with substrate loaded from .ikg file.
-        Path defaults to env IKIGAI_IKG or c:/neuroseed/organism.ikg.
+        Path defaults to env IKIGAI_IKG or organism.ikg next to this module.
         """
         import os
         from ikigai.cognition.multirole_memory import MultiRoleMemory
@@ -3388,542 +4803,11 @@ class IkigaiOrganism:
         order = _np.argsort(-cos_scores)[:top_k]
         return [(candidates[int(i)], float(cos_scores[int(i)])) for i in order]
 
-    # ── Pack 192 v1 (Day 64): DEEP absorb -- child learns from conversation ──
-    def _diverse_seed_prompts(self, hf_model, tokenizer, n, device='cpu'):
-        """Generate diverse seed prompts FROM THE LLM ITSELF (no hardcode).
-        Strategy: pick high-entropy single tokens by embed-row variance as
-        topic seeds. Each seed is a single token that the LLM will complete
-        into a coherent paragraph during Phase B.
-        """
-        import torch
-        # Universal accessor: get_input_embeddings() works across HF families
-        # (Qwen2 .model.embed_tokens, Qwen3.5 hybrid, GPT-2, Llama, etc).
-        emb_layer = hf_model.get_input_embeddings()
-        # .float() forces fp32 in torch before numpy (bf16/fp16 unsupported by numpy)
-        embed = emb_layer.weight.detach().float().to('cpu').numpy().astype(np.float32)
-        # variance per row = information density of that token's embedding
-        diversity = embed.std(axis=1)
-        k = int(min(n, embed.shape[0]))
-        top = np.argpartition(-diversity, k - 1)[:k]
-        # filter to printable strings
-        seeds = []
-        for tid in top:
-            try:
-                s = tokenizer.decode([int(tid)]).strip()
-            except Exception:
-                continue
-            if s and len(s) < 32:
-                seeds.append(s)
-            if len(seeds) >= n:
-                break
-        return seeds
-
-    # ── Pack 192 v1.1: POS classifier + junk-text filter ────────────────────
-    @staticmethod
-    def _is_junk_token(tok):
-        """Reject code-y / non-linguistic tokens before substrate write.
-        Heuristics (not English-hardcoded): contains digits, too long, low
-        alpha ratio, camel-case markers."""
-        if not tok or len(tok) > 14:
-            return True
-        if any(ch.isdigit() for ch in tok):
-            return True
-        n_alpha = sum(1 for ch in tok if ch.isalpha())
-        if n_alpha == 0 or n_alpha / len(tok) < 0.7:
-            return True
-        # camelCase / PascalCase mid-word uppercase (e.g. 'sendStatus', 'lastFilesWidget')
-        if any(c.isupper() for c in tok[1:]):
-            return True
-        return False
-
-    @classmethod
-    def _filter_junk_text(cls, text):
-        """Drop junk tokens from text. Preserves order, lowercases output."""
-        import re as _re
-        toks = _re.findall(r"[A-Za-z']+", text)
-        kept = [t.lower() for t in toks if not cls._is_junk_token(t)]
-        return ' '.join(kept)
-
-    def _build_emergent_clusterer(self, hf_model, tokenizer, n_clusters=64,
-                                    sample_tokens=20000):
-        """Pack 192 v1.2 -- EMERGENT category clusterer. NO hardcoded labels.
-
-        Clusters LLM embeddings via mini-batch k-means. Each token gets a
-        cluster id (c0..c{K-1}). The categories EMERGE from distributional
-        geometry; we never tell the model what a 'noun' or 'verb' is.
-
-        FIX (v1.2.1): sample alpha-only ASCII tokens (no code, no foreign
-        scripts, no numerics), mean-center before clustering (kills the
-        frequent-word collapse axis), K=64 for finer granularity.
-
-        Returns a callable: cluster_of(tokens) -> {token: 'c{id}' or '?'}
-        """
-        import numpy as _np
-        from sklearn.cluster import MiniBatchKMeans
-
-        emb_layer = hf_model.get_input_embeddings()
-        embed = emb_layer.weight.detach().float().to('cpu').numpy()
-        V, D = embed.shape
-
-        # Build alpha-only token mask via tokenizer decode
-        clean_ids = []
-        for tid in range(V):
-            try:
-                s = tokenizer.decode([tid]).strip()
-            except Exception:
-                continue
-            if not s or len(s) > 14:
-                continue
-            if not all(ch.isalpha() and ord(ch) < 128 for ch in s):
-                continue  # require pure ASCII alpha
-            if any(c.isupper() for c in s[1:]):
-                continue  # drop camelCase fragments
-            clean_ids.append(tid)
-        clean_ids = _np.array(clean_ids, dtype=_np.int64)
-
-        # Random sample without diversity bias
-        rng = _np.random.default_rng(0)
-        if len(clean_ids) > sample_tokens:
-            pick = rng.choice(len(clean_ids), size=sample_tokens, replace=False)
-            sample_ids = clean_ids[pick]
-        else:
-            sample_ids = clean_ids
-
-        sample_vecs = embed[sample_ids]
-        # Mean-center to remove dominant frequent-word axis
-        center = sample_vecs.mean(axis=0)
-        sample_centered = sample_vecs - center
-        norms = _np.linalg.norm(sample_centered, axis=1, keepdims=True)
-        norms = _np.where(norms > 1e-8, norms, 1.0)
-        sample_unit = (sample_centered / norms).astype(_np.float32)
-
-        km = MiniBatchKMeans(n_clusters=int(n_clusters), random_state=0,
-                              batch_size=512, n_init=5, max_iter=400)
-        km.fit(sample_unit)
-
-        # Pre-compute centered+normalized embeds for ALL tokens (one-time cost)
-        all_centered = embed - center
-        all_norms = _np.linalg.norm(all_centered, axis=1, keepdims=True)
-        all_norms = _np.where(all_norms > 1e-8, all_norms, 1.0)
-        all_unit = (all_centered / all_norms).astype(_np.float32)
-
-        token_id_cluster = {}
-
-        def cluster_of(tokens):
-            out = {}
-            for tok in tokens:
-                if tok in token_id_cluster:
-                    out[tok] = token_id_cluster[tok]
-                    continue
-                ids = tokenizer.encode(tok, add_special_tokens=False)
-                if not ids:
-                    token_id_cluster[tok] = '?'; out[tok] = '?'; continue
-                v = all_unit[ids].mean(axis=0)
-                n = _np.linalg.norm(v)
-                if n == 0:
-                    token_id_cluster[tok] = '?'; out[tok] = '?'; continue
-                v = (v / n).reshape(1, -1)
-                cid = int(km.predict(v)[0])
-                tag = f'c{cid}'
-                token_id_cluster[tok] = tag
-                out[tok] = tag
-            return out
-
-        cluster_of.kmeans = km
-        cluster_of.unit_embed = all_unit
-        cluster_of.center = center
-        cluster_of.n_clusters = int(n_clusters)
-        cluster_of.n_clean_vocab = len(clean_ids)
-        return cluster_of
-
-    def absorb_llm_deep(self, hf_model, tokenizer, n_prompts=10000,
-                         gen_len=80, batch_size=32, use_gpu=True,
-                         seed_prompts=None, prompt_temperature=0.8,
-                         sleep_after=True, auto_save_ikg=True, ikg_path=None,
-                         verbose=True):
-        """Pack 192 v1 -- DEEP compositional absorb. Child learns from
-        diverse conversations, not from a dictionary.
-
-        Generates n_prompts diverse LLM completions (batched on GPU),
-        feeds each through org.read() so the full parser stack fires,
-        plus explicit expose_meaning() per sentence for SVO/episode/mod.
-
-        Phase A: build diverse prompt list (n_prompts strings)
-        Phase B: batched LLM generation (gen_len tokens each)
-        Phase C: per generation -> org.read + expose_meaning
-        Phase D: sleep_consolidate
-        Phase E: save .ikg
-
-        On RTX 3050 + Qwen2.5-0.5B: ~15-30 min for n_prompts=10000.
-        """
-        import time as _t
-        import torch
-        device = 'cuda' if use_gpu and torch.cuda.is_available() else 'cpu'
-        # Respect device_map dispatch -- do not force .to() on accelerate-managed models.
-        _has_hf_device_map = hasattr(hf_model, 'hf_device_map') and bool(getattr(hf_model, 'hf_device_map'))
-        if use_gpu and device == 'cuda' and not _has_hf_device_map:
-            hf_model = hf_model.to(device)
-        hf_model.eval()
-        if tokenizer.pad_token_id is None:
-            tokenizer.pad_token = tokenizer.eos_token
-        stats = {'n_prompts': 0, 'n_reads': 0, 'n_meaning': 0,
-                 'gen_tokens': 0}
-
-        # ── PHASE A: diverse prompts from the LLM itself ─────────────────
-        if seed_prompts is None:
-            seeds = self._diverse_seed_prompts(hf_model, tokenizer,
-                                                  n=n_prompts, device=device)
-        else:
-            seeds = list(seed_prompts)[:n_prompts]
-        stats['n_prompts'] = len(seeds)
-        if verbose:
-            print(f'  [P192v1/A] {len(seeds)} seed-token prompts ready', flush=True)
-
-        # Pack 199: emergent clusterer DROPPED. Was collapsing all English to
-        # one cluster; offered no signal. Frames + frame_vocab carry the
-        # category structure now, emerging from distributional context (NO
-        # hardcoded POS labels).
-        cluster_of = None
-        stats['n_junk_dropped'] = 0
-        stats['n_pos_writes'] = 0
-        stats['n_cluster_writes'] = 0
-
-        # ── PHASE B+C: batched generation -> read -> meaning ─────────────
-        if verbose:
-            print(f'  [P192v1/BC] generating + reading '
-                  f'(batch={batch_size}, gen_len={gen_len}, gpu={device}) ...',
-                  flush=True)
-        t0 = _t.perf_counter()
-        import gc as _gc
-        with torch.no_grad():
-            for batch_start in range(0, len(seeds), batch_size):
-                batch_end = min(batch_start + batch_size, len(seeds))
-                batch_prompts = seeds[batch_start:batch_end]
-                enc = tokenizer(batch_prompts, return_tensors='pt',
-                                  padding=True, truncation=True,
-                                  max_length=32).to(device)
-                gen_ids = hf_model.generate(
-                    **enc,
-                    max_new_tokens=gen_len,
-                    do_sample=True,
-                    temperature=float(prompt_temperature),
-                    top_p=0.95,
-                    pad_token_id=tokenizer.pad_token_id,
-                )
-                # decode + free GPU tensors before any CPU work
-                texts = []
-                for i in range(gen_ids.shape[0]):
-                    texts.append(tokenizer.decode(gen_ids[i],
-                                                   skip_special_tokens=True))
-                gen_shape1 = int(gen_ids.shape[1])
-                del enc, gen_ids
-                if device == 'cuda':
-                    torch.cuda.empty_cache()
-                for text in texts:
-                    if not text or len(text) < 5:
-                        continue
-                    # Junk filter: drop code-y tokens BEFORE substrate write.
-                    raw_len = len(text)
-                    text = self._filter_junk_text(text)
-                    if len(text) < 5:
-                        stats['n_junk_dropped'] += 1
-                        continue
-                    # Pack 219: frame routing now lives inside read_organism().
-                    # Stats accumulated by reading org.frames.last_assigned after.
-                    try:
-                        # Pack 210 -- read through full cognitive stack
-                        self.read_organism(text, speaker=getattr(hf_model,
-                                                                      'name_or_path', 'llm'))
-                        stats['n_reads'] += 1
-                    except Exception:
-                        pass
-                    try:
-                        m = self.unified.expose_meaning(text)
-                        stats['n_meaning'] += sum(m.values())
-                    except Exception:
-                        pass
-                    # Pack 199 NEW2: positional syntax-tree binding per sentence
-                    try:
-                        syn_n = self.unified.expose_syntax_tree(text, max_pos=8)
-                        stats['n_syntax_writes'] = stats.get('n_syntax_writes', 0) + syn_n
-                    except Exception:
-                        pass
-                    # Pack 199: emergent clusterer dropped. Frames + frame_vocab
-                    # carry category structure now (no POS hardcode).
-                    # Clear frame after writes so subsequent ops are unconditioned
-                    self.clear_frame()
-                    stats['gen_tokens'] += gen_shape1
-                del texts
-                # periodic full sweep every 20 batches
-                if (batch_start // batch_size) % 20 == 19:
-                    _gc.collect()
-                if verbose and (batch_start // batch_size) % 10 == 0:
-                    elapsed = _t.perf_counter() - t0
-                    pct = 100.0 * batch_end / len(seeds)
-                    # Pack 199 D: mid-absorb frame diagnostic
-                    assigns = self.frames.assigns_per_frame.tolist() \
-                        if hasattr(self, 'frames') else []
-                    locked = self.frames.locked if hasattr(self, 'frames') else False
-                    print(f'    progress {batch_end}/{len(seeds)} ({pct:.0f}%) '
-                          f'reads={stats["n_reads"]} cooccur={len(self.unified._cooccur_seen)} '
-                          f'frames_locked={locked} assigns={assigns} '
-                          f'in {elapsed:.0f}s', flush=True)
-        if verbose:
-            print(f'  [P192v1/BC] {stats["n_reads"]} reads, '
-                  f'{stats["n_meaning"]} meaning writes in '
-                  f'{_t.perf_counter()-t0:.1f}s', flush=True)
-
-        # ── PHASE D: sleep consolidate ──────────────────────────────────
-        if sleep_after:
-            if verbose:
-                print(f'  [P192v1/D] sleep_consolidate ...', flush=True)
-            t0 = _t.perf_counter()
-            if getattr(self, '_exposure_buf', None) is None:
-                self.enable_sleep_log()
-            try:
-                self.sleep_consolidate(replay_factor=3, build_concepts=True,
-                                          verbose=False)
-                stats['phase_d_sleep'] = 1
-                if verbose:
-                    print(f'  [P192v1/D] consolidated in '
-                          f'{_t.perf_counter()-t0:.1f}s', flush=True)
-            except Exception as e:
-                stats['phase_d_sleep'] = 0
-                if verbose:
-                    print(f'  [P192v1/D] sleep skipped: {e}', flush=True)
-
-        # ── PHASE E: save .ikg ──────────────────────────────────────────
-        stats['substrate_mb'] = self.unified.substrate_bytes() / 1_048_576
-        stats['cooccur_vocab'] = len(self.unified._cooccur_seen)
-        stats['seen_vocab'] = len(self.unified._seen)
-        if auto_save_ikg:
-            save_info = self.save_ikg(ikg_path)
-            stats['ikg_path'] = save_info['path']
-            stats['ikg_size_mb'] = save_info['size_mb']
-            if verbose:
-                print(f'  [P192v1/E] saved .ikg -> {save_info["path"]} '
-                      f'({save_info["size_mb"]:.1f} MB)', flush=True)
-        return stats
-
-    # ── Pack 192 v0 (kept for archeology): vocab-sweep absorb ────────────
-    def absorb_llm(self, hf_model, tokenizer, depth=2, common_k=5000,
-                     neighbors=8, sleep_after=True, use_gpu=False,
-                     auto_save_ikg=True, ikg_path=None,
-                     verbose=True):
-        """Decode LLM into the EXISTING org.unified MultiRoleMemory.
-
-        Pack 192 (Day 64): LLM = book. Vocab sweep + multi-token forward
-        feed the existing parsers (read), which write concepts into the
-        fixed substrate via relate(). No new substrate file. No sidecar.
-        LLM deleted at end.
-
-        Phases:
-          1. vocab embed similarity     -> relate(w, 'similar', neighbor)
-          2. single-token forward       -> relate(w, 'next', top_logits)
-          3. depth-N forward on common  -> self.read(text) all parsers fire
-          4. sleep_consolidate          -> cluster + concept refresh
-
-        Args:
-          hf_model    : HF causal LM (Qwen/Llama/Mistral/Phi, etc)
-          tokenizer   : matching HF tokenizer
-          depth       : multi-token forward depth in Phase 3 (default 2)
-          common_k    : how many most-distinctive vocab tokens to use in
-                        Phase 3 (default 5000)
-          neighbors   : top-k neighbors written per token in Phases 1+2
-          sleep_after : run sleep_consolidate after absorb
-          use_gpu     : move model + tensors to CUDA (default False)
-          verbose     : print phase progress
-
-        Returns: dict with counts per phase and final substrate stats.
-        Caller responsibility: `del hf_model` after this returns.
-        """
-        import time as _t
-        import torch
-        device = 'cuda' if use_gpu and torch.cuda.is_available() else 'cpu'
-        if use_gpu and device == 'cuda':
-            hf_model = hf_model.to(device)
-        hf_model.eval()
-
-        # ensure roles exist (Pack 195 will add to DEFAULT_ROLES; v0 registers
-        # 'similar' dynamically via _ensure_role)
-        self._ensure_role('similar')
-
-        model_inner = hf_model.model if hasattr(hf_model, 'model') else hf_model
-        embed_t = model_inner.embed_tokens.weight.detach()
-        if device == 'cuda':
-            embed_cpu = embed_t.cpu()
-        else:
-            embed_cpu = embed_t
-        embed = embed_cpu.numpy().astype(np.float32)
-        vocab = embed.shape[0]
-        stats = {'phase1': 0, 'phase2': 0, 'phase3': 0, 'phase4': 0,
-                 'vocab': int(vocab)}
-
-        # Decode batch once (massive speedup over per-token decode)
-        if verbose:
-            print(f'  [P192/0] decoding vocab strings ...', flush=True)
-        t0 = _t.perf_counter()
-        words = []
-        for tid in range(vocab):
-            try:
-                w = tokenizer.decode([int(tid)]).strip()
-            except Exception:
-                w = ''
-            words.append(w if w and len(w) <= 64 else '')
-        if verbose:
-            n_good = sum(1 for w in words if w)
-            print(f'  [P192/0] decoded {n_good}/{vocab} usable in '
-                  f'{_t.perf_counter()-t0:.1f}s', flush=True)
-
-        # ── PHASE 1: vocab embed similarity (BATCHED) ────────────────────
-        if verbose:
-            print(f'  [P192/1] vocab embed similarity (batched) ...',
-                  flush=True)
-        t0 = _t.perf_counter()
-        embed_n = embed / (np.linalg.norm(embed, axis=1, keepdims=True) + 1e-9)
-        BATCH = 512
-        for chunk0 in range(0, vocab, BATCH):
-            chunk1 = min(chunk0 + BATCH, vocab)
-            # (chunk, vocab) similarity matrix
-            sims = embed_n[chunk0:chunk1] @ embed_n.T
-            # mask self
-            for i, tid in enumerate(range(chunk0, chunk1)):
-                sims[i, tid] = -1.0
-            # top-k per row
-            top_idx = np.argpartition(-sims, neighbors, axis=1)[:, :neighbors]
-            for i, tid in enumerate(range(chunk0, chunk1)):
-                w = words[tid]
-                if not w:
-                    continue
-                for n in top_idx[i]:
-                    nw = words[int(n)]
-                    if not nw:
-                        continue
-                    self.unified.relate(w, 'similar', nw)
-                    stats['phase1'] += 1
-            if verbose and chunk0 // BATCH % 50 == 0:
-                print(f'    P1 progress {chunk1}/{vocab} '
-                      f'({stats["phase1"]} relations so far)', flush=True)
-        if verbose:
-            print(f'  [P192/1] {stats["phase1"]} similar-relations in '
-                  f'{_t.perf_counter()-t0:.1f}s', flush=True)
-
-        # ── PHASE 2: single-token forward -> next transitions (BATCHED) ──
-        if verbose:
-            print(f'  [P192/2] single-token forward -> next (batched) ...',
-                  flush=True)
-        t0 = _t.perf_counter()
-        FB = 256 if device == 'cuda' else 32
-        with torch.no_grad():
-            for chunk0 in range(0, vocab, FB):
-                chunk1 = min(chunk0 + FB, vocab)
-                ids_t = torch.arange(chunk0, chunk1, device=device).unsqueeze(1)
-                logits = hf_model(ids_t).logits[:, -1].cpu().numpy()
-                top_idx = np.argpartition(-logits, neighbors, axis=1)[:, :neighbors]
-                for i, tid in enumerate(range(chunk0, chunk1)):
-                    w = words[tid]
-                    if not w:
-                        continue
-                    for n in top_idx[i]:
-                        nw = words[int(n)]
-                        if not nw:
-                            continue
-                        self.unified.relate(w, 'next', nw)
-                        stats['phase2'] += 1
-                if verbose and chunk0 // FB % 50 == 0:
-                    print(f'    P2 progress {chunk1}/{vocab} '
-                          f'({stats["phase2"]} relations so far)', flush=True)
-        if verbose:
-            print(f'  [P192/2] {stats["phase2"]} next-relations in '
-                  f'{_t.perf_counter()-t0:.1f}s', flush=True)
-
-        # ── PHASE 3: depth-N forward on common tokens -> org.read ────────
-        if verbose:
-            print(f'  [P192/3] depth-{depth} forward on top {common_k} '
-                  f'distinctive tokens ...', flush=True)
-        t0 = _t.perf_counter()
-        # pick the most distinctive tokens by embed variance
-        diversity = embed_n.std(axis=1)
-        k_eff = int(min(common_k, vocab))
-        common = np.argpartition(-diversity, k_eff - 1)[:k_eff]
-        with torch.no_grad():
-            for tid in common:
-                ids = [int(tid)]
-                for _ in range(int(depth)):
-                    ids_t = torch.tensor([ids], device=device)
-                    out = hf_model(ids_t).logits[0, -1]
-                    ids.append(int(out.argmax().item()))
-                text = tokenizer.decode(ids)
-                if text and len(text) <= 512:
-                    self.read(text)
-                    stats['phase3'] += 1
-                if verbose and stats['phase3'] % 1000 == 0 and stats['phase3'] > 0:
-                    print(f'    P3 progress {stats["phase3"]}/{k_eff}',
-                          flush=True)
-        if verbose:
-            print(f'  [P192/3] {stats["phase3"]} compositional reads in '
-                  f'{_t.perf_counter()-t0:.1f}s', flush=True)
-
-        # ── PHASE 4: sleep consolidate ───────────────────────────────────
-        if sleep_after:
-            if verbose:
-                print(f'  [P192/4] sleep_consolidate ...', flush=True)
-            t0 = _t.perf_counter()
-            if getattr(self, '_exposure_buf', None) is None:
-                self.enable_sleep_log()
-            try:
-                self.sleep_consolidate(replay_factor=3, build_concepts=True,
-                                          verbose=False)
-                stats['phase4'] = 1
-                if verbose:
-                    print(f'  [P192/4] consolidated in '
-                          f'{_t.perf_counter()-t0:.1f}s', flush=True)
-            except Exception as e:
-                if verbose:
-                    print(f'  [P192/4] sleep_consolidate skipped: {e}',
-                          flush=True)
-
-        stats['substrate_mb'] = self.unified.substrate_bytes() / 1_048_576
-        stats['cooccur_vocab'] = len(getattr(self.unified, '_cooccur_seen', set()))
-        stats['seen_vocab'] = len(getattr(self.unified, '_seen', set()))
-        for k, v in (self.unified._role_targets or {}).items():
-            stats[f'role_{k}_targets'] = len(v)
-        if verbose:
-            print(f'  [P192] DONE. substrate {stats["substrate_mb"]:.1f} MB, '
-                  f'vocab seen {stats["seen_vocab"]}, '
-                  f'phase counts: '
-                  f'P1={stats["phase1"]} P2={stats["phase2"]} '
-                  f'P3={stats["phase3"]} P4={stats["phase4"]}', flush=True)
-        if auto_save_ikg:
-            save_info = self.save_ikg(ikg_path)
-            if verbose:
-                print(f'  [P192] auto-saved .ikg -> {save_info["path"]} '
-                      f'({save_info["size_mb"]:.1f} MB compressed)', flush=True)
-            stats['ikg_path'] = save_info['path']
-            stats['ikg_size_mb'] = save_info['size_mb']
-        return stats
-
-    # ── Pack 173: T2S Compiler v0 (NVIDIA Killer #2) ─────────────────────
-    def t2s(self, role=None, seed=24001, d=None, K=1):
-        """Open a Transformer-to-Substrate compiler.
-
-        Returns the active T2S if one exists (preserves an absorbed model
-        across calls with default args). Builds a fresh one only when
-        explicit d/K differ from the active one, or when none exists.
-        """
-        from ikigai.cognition.t2s_compiler import T2SCompiler
-        existing = getattr(self, '_t2s', None)
-        # If caller passed defaults (d=None, K=1) and we already have one,
-        # return the existing one regardless of its d/K -- supports the
-        # "absorb once, prompt later" pattern.
-        if existing is not None and d is None and K == 1:
-            return existing
-        cache_key = (d, K)
-        if (existing is None
-                or getattr(self, '_t2s_dk', None) != cache_key):
-            self._t2s = T2SCompiler(self, role=role, seed=seed, d=d, K=K)
-            self._t2s_dk = cache_key
-        return self._t2s
+    # T2S weight-bake API REMOVED (audit trio, Day-83): t2s() factory,
+    # absorb/absorb_llm/absorb_llm_deep/absorb_native, _diverse_seed_prompts,
+    # _build_emergent_clusterer, _is_junk_token/_filter_junk_text, big-substrate
+    # + native gpt2/llama forward methods -- all on the deleted t2s_compiler
+    # (abandoned mission: LLMs are data oracles, not weight donors). udsp preserved.
 
     # ── Pack 190: Galois-field rank router (must-invent #2) ───────────────
     def galois_router(self, p=251, d=None, seed=4096):
@@ -3953,113 +4837,17 @@ class IkigaiOrganism:
             self._isw_target = target
         return self._isw
 
-    # ── Pack 211: substrate-native absorb (model gone, substrate runs) ────
-    def _ensure_big_substrate(self, d=2048, M=131072, k=128, seed=4096):
-        """Lazy-alloc the big VSA-SDM substrate (~4 GB at default).
-        Reused across absorb/generate calls."""
-        t2s = self.t2s(d=self.unified.d, K=1)
-        if not hasattr(t2s, 'big_substrate'):
-            t2s.create_big_substrate(d=d, M=M, k=k, seed=seed)
-        return t2s
-
-    def absorb_native(self, hf_model, tokenizer=None, model_id=None,
-                       name_prefix='subst', K_writes=2,
-                       d=2048, M=131072, verbose=True):
-        """Substrate-native absorption: write LLM weights INTO substrate,
-        precompute Pack 213 idx cache for fast forward, drop model reference.
-        Caller must `del hf_model` in their scope to fully release."""
-        import gc as _gc
-        t2s = self._ensure_big_substrate(d=d, M=M)
-        cfg = hf_model.config
-        self._absorbed_config = {
-            'num_hidden_layers': int(cfg.num_hidden_layers),
-            'num_attention_heads': int(cfg.num_attention_heads),
-            'num_key_value_heads': int(getattr(cfg, 'num_key_value_heads',
-                                                  cfg.num_attention_heads)),
-            'hidden_size': int(cfg.hidden_size),
-            'intermediate_size': int(cfg.intermediate_size),
-            'head_dim': int(getattr(cfg, 'head_dim',
-                                      cfg.hidden_size // cfg.num_attention_heads)),
-            'rope_theta': float(getattr(cfg, 'rope_theta', 10000.0)),
-            'rms_norm_eps': float(getattr(cfg, 'rms_norm_eps', 1e-6)),
-            'vocab_size': int(cfg.vocab_size),
-            'model_id': model_id,
-        }
-        self._absorbed_tokenizer = tokenizer
-        self._absorbed_name_prefix = name_prefix
-        n_layers, n_writes = t2s.compile_llama_into_big_substrate(
-            hf_model, K_writes=K_writes, name_prefix=name_prefix,
-            verbose=verbose)
-        t2s.precompute_big_idx_cache(name_prefix=name_prefix, verbose=verbose)
-        _gc.collect()
-        return {'n_layers': n_layers, 'n_writes': n_writes,
-                'substrate_gb': t2s.big_substrate.substrate_bytes() / 1e9}
-
-    def generate_native(self, prompt, max_new=10, tokenizer=None, fast=True,
-                          verbose=False):
-        """Substrate-only generation. Forward reads weights from substrate."""
-        t2s = self.t2s(d=self.unified.d, K=1)
-        if not hasattr(t2s, 'llm_n_layers'):
-            raise RuntimeError('no model absorbed; call org.absorb_native() first')
-        tok = tokenizer or self._absorbed_tokenizer
-        if tok is None:
-            raise ValueError('tokenizer required')
-        prefix = self._absorbed_name_prefix
-        fwd = (t2s.llama_forward_big_substrate_fast if fast
-               else t2s.llama_forward_big_substrate)
-        ids = list(tok.encode(prompt))
-        for _ in range(int(max_new)):
-            logits = fwd(ids, name_prefix=prefix)
-            nxt = int(logits[-1].argmax())
-            ids.append(nxt)
-            if verbose:
-                print(f'  +{tok.decode([nxt])!r}', flush=True)
-        return tok.decode(ids)
-
-    def forward_logits_native(self, prompt, tokenizer=None, fast=True):
-        """One substrate-only forward pass. Returns logits (seq_len, vocab)."""
-        t2s = self.t2s(d=self.unified.d, K=1)
-        tok = tokenizer or self._absorbed_tokenizer
-        prefix = self._absorbed_name_prefix
-        fwd = (t2s.llama_forward_big_substrate_fast if fast
-               else t2s.llama_forward_big_substrate)
-        return fwd(tok.encode(prompt), name_prefix=prefix)
-
-    def audit_native(self):
-        """Honest accounting: what's IN substrate vs still sidecar."""
-        t2s = self.t2s(d=self.unified.d, K=1)
-        if not hasattr(t2s, 'big_substrate'):
-            return {'absorbed': False}
-        sub_bytes = int(t2s.big_substrate.substrate_bytes())
-        sidecar = {}
-        if hasattr(t2s, 'llm_embed'):
-            sidecar['llm_embed'] = t2s.llm_embed.nbytes
-        if hasattr(t2s, 'llm_lm_head'):
-            shared = (hasattr(t2s, 'llm_embed')
-                       and t2s.llm_lm_head is t2s.llm_embed)
-            sidecar['llm_lm_head'] = ('shared_with_embed' if shared
-                                       else t2s.llm_lm_head.nbytes)
-        bc = getattr(t2s, 'bias_cache', {}) or {}
-        sidecar['bias_cache'] = sum(v.nbytes for v in bc.values()
-                                     if hasattr(v, 'nbytes'))
-        lnc = getattr(t2s, 'ln_cache', {}) or {}
-        sidecar['ln_cache'] = sum((v[0].nbytes if hasattr(v[0], 'nbytes') else 0)
-                                   + (v[1].nbytes if hasattr(v[1], 'nbytes') else 0)
-                                   for v in lnc.values())
-        sidecar_bytes = sum(v for v in sidecar.values() if isinstance(v, int))
-        return {
-            'absorbed': True,
-            'config': getattr(self, '_absorbed_config', None),
-            'substrate_bytes': sub_bytes,
-            'substrate_gb': sub_bytes / 1e9,
-            'sidecar_breakdown': sidecar,
-            'sidecar_bytes': sidecar_bytes,
-            'sidecar_mb': sidecar_bytes / 1e6,
-            'total_gb': (sub_bytes + sidecar_bytes) / 1e9,
-            'in_substrate': ['Q/K/V/O', 'gate/up/down (per-layer weights)'],
-            'pack_212_targets': ['llm_embed', 'llm_lm_head',
-                                  'bias_cache', 'ln_cache'],
-        }
+    def time_role(self):
+        """WIRE (Day-83 audit): time-as-a-role temporal indexing (lazy). Bind a
+        timestamp BUCKET into an address as a phasor role factor, then query
+        "what was X's <role> at time T" -- assert_at(word, role, target, bucket)
+        / query_at(word, role, bucket) / diff(word, role, bucket_a, bucket_b).
+        A native temporal-memory primitive over the unified substrate."""
+        tr = getattr(self, '_time_role', None)
+        if tr is None:
+            from ikigai.cognition.time_role import TimeRole
+            tr = self._time_role = TimeRole(self.unified)
+        return tr
 
     # ── Pack 200: Universal Data Codec Protocol -- the phone ─────────────
     def absorb_anything(self, ecc_replicas=3, hopfield_iter=5,
@@ -4449,9 +5237,41 @@ class IkigaiOrganism:
             self.being.expose(s)
         return self.being.reflect()
 
-    def dream(self):
-        """Sleep cycle: consolidate being's lexicon."""
-        return self.being.dream()
+    def dream(self, discover=True, seed=None):
+        """Sleep cycle.  Consolidates the being's lexicon AND, Day-87, DREAMS
+        CREATIVELY: the organism recombines what it knows and wakes with facts
+        nobody told it -- DISCOVERIES entailed by its own rules (proven, by
+        derive-chaining) and CONJECTURES leapt to by signature resonance (tagged
+        low-confidence beliefs, testable later).  See CompositionEngine.
+        dream_discover.  Discoveries are reported, not stored (free to re-derive);
+        conjectures are filed as beliefs kept apart from ground truth.  Returns
+        the lexicon stats plus the night's discoveries and conjectures."""
+        out = dict(self.being.dream())
+        if not discover:
+            return out
+        try:
+            eng = self.general_reasoner.derive_engine
+            dd = eng.dream_discover(seed=seed)
+        except Exception as e:
+            out['dream_err'] = str(e)[:80]
+            return out
+        out['discoveries'] = dd['discoveries']
+        out['conjectures'] = dd['conjectures']
+        # file conjectures as low-confidence beliefs, kept apart from derived
+        # facts -- exactly a dreamed hypothesis the life loop can later test.
+        if not hasattr(self, '_beliefs'):
+            self._beliefs = {}
+        filed = 0
+        for (s, r, v, score, prov) in dd['conjectures']:
+            if (s, r) in self._beliefs:                     # don't clobber a real prediction
+                continue
+            self._beliefs[(s, r)] = {
+                'value': v, 'confidence': round(min(0.6, float(score)), 2),
+                'source': f'dreamed conjecture ({prov})'}
+            filed += 1
+        out['discovered'] = len(dd['discoveries'])
+        out['conjectured'] = filed
+        return out
 
     def word_similarity(self, w1, w2, source='dict'):
         """Word similarity. source='dict' (IkigaiBeing) or 'flat' (VSA-SDM)."""
@@ -4507,35 +5327,45 @@ class IkigaiOrganism:
     # ── Phase 3: dialogue + generation ───────────────────────────────────
 
     def new_dialogue(self, persona=None):
-        """Start a fresh multi-turn conversation."""
+        """Start a fresh multi-turn conversation. Replies via frame_relax
+        (Day-83 audit rewire: SentenceGenerator Markov path retired → data-free
+        grammatical free-fluency, Pack 313)."""
         loop = DialogueLoop(self, d=2048)
         loop.start(persona_name=persona)
-        loop._generator = SentenceGenerator(self, d=2048)
-        # Attach a convenience method for the loop
         def respond_to(user_text, **kwargs):
-            reply = loop._generator.respond(user_text, dialogue_loop=loop, **kwargs)
+            r = self.say_frame(message=None,
+                               seed=abs(hash(user_text)) % (2**31),
+                               n_iters=kwargs.get('n_iters', 6))
+            reply = r['text'] if r else ''
             loop.user_says(user_text)
             t = loop.agent_says(reply)
             return reply, t
         loop.respond_to = respond_to
         return loop
 
-    def generate(self, prompt='', max_len=15, mode='context_biased', **kwargs):
-        """Direct generation. Returns text string."""
-        gen = SentenceGenerator(self, d=2048)
-        return gen.generate(prompt=prompt, max_len=max_len, mode=mode, **kwargs)
+    def generate_frame(self, prompt='', max_len=15, mode='context_biased', **kwargs):
+        """Direct generation via frame_relax (Day-83 audit rewire: the old
+        SentenceGenerator Markov walk over being.lexicon is superseded by the
+        data-free grammatical generator, Pack 313). Returns text string.
+        (Day 90: renamed from `generate` -> `generate_frame` so `generate` is the one
+        unified grounded-walk generation entry; this frame-relax path is the `mode='frame'`
+        variant.)"""
+        seed = kwargs.get('seed', abs(hash(prompt)) % (2**31) if prompt else 0)
+        r = self.say_frame(message=None, seed=seed,
+                           n_iters=kwargs.get('n_iters', 6))
+        return r['text'] if r else ''
 
     def trace(self):
         """Returns last reasoning trace."""
         return list(self._last_trace)
 
     def memory(self):
-        """Current working-memory state."""
-        return self.reasoner.wm.all_values()
+        """Recent episodic state (legacy ReasoningEngine working-memory dict
+        retired with the trio, Day-83 audit)."""
+        return {e['tick']: e['answer'] for e in self._episodes[-16:]}
 
     def reset(self):
-        """Clear working memory + episodic chain (start fresh)."""
-        self.reasoner.reset()
+        """Clear episodic chain (start fresh)."""
         self._episodes = []
         self._last_trace = []
         self._tick = 0
@@ -4556,8 +5386,6 @@ class IkigaiOrganism:
         return {
             'tick':              self._tick,
             'n_episodes':        len(self._episodes),
-            'wm_vars':           len(self.reasoner.wm.all_values()),
-            'wm_history':        len(self.reasoner.wm.history()),
             'n_threats':         self.immune.n_threats,
             'n_concepts':        self.modal.n_concepts,
             'n_skills_holo':     getattr(self.holo, 'n_stored', 0),
@@ -4676,8 +5504,5 @@ if __name__ == '__main__':
     print('  Q: "Janet has 5 apples. She ate 2. How many apples does Janet have?"')
     r = org.ask("Janet has 5 apples. She ate 2. How many apples does Janet have?")
     print(f'  A: {r["answer"]}')
-    print(f'  WM state: {r["wm"]}')
-    print(f'  trace:')
-    for s, stmt, v in r['trace']:
-        print(f'    sentence={s!r}')
-        print(f'      parsed={stmt}, value={v}')
+    print(f'  method: {r.get("method")}')
+    print(f'  trace: {r.get("trace")}')

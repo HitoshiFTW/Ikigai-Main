@@ -89,10 +89,9 @@ class UniversalCodec:
                              self._decode_weights, chunk=self._chunk_weights)
         self.register_codec('image', self._encode_image, self._decode_image,
                              chunk=lambda d: [d])
-        # Pack 201: real LLM codec via T2S int8 alpha (cosine 0.99 proven)
-        self.register_codec('llm', self._encode_llm, self._decode_llm,
-                             chunk=lambda d: [d])
-        # registry: name_prefix -> tokenizer + last-absorbed model_id
+        # llm codec REMOVED (audit trio, Day-83): rode the deleted t2s_compiler
+        # weight-bake path (abandoned mission: LLMs = data oracles, not weight
+        # donors). The text/bytes/weights/image codecs are unaffected.
         self._llm_registry = {}
 
     # ── modality detection ────────────────────────────────────────────────
@@ -320,88 +319,8 @@ class UniversalCodec:
         return residual
 
     # ── Pack 201: LLM codec ──────────────────────────────────────────────
-    def _encode_llm(self, hf_model, name_prefix=None, tokenizer=None,
-                     model_id=None):
-        """Compile HF transformer into T2S int8 alpha (Pack 187 path).
-        Stores reference to the T2S compiler in residual for forward path.
-        HV signature = embed table mean (cheap modality fingerprint).
-        """
-        if name_prefix is None:
-            name_prefix = f'udcp_llm_{len(self._llm_registry)}'
-        t2s = self.org.t2s(d=self.d, K=1)
-        t2s.compile_llama_model_alpha(hf_model, name_prefix=name_prefix,
-                                        verbose=False)
-        # signature HV: hash of embed table for modality fingerprint
-        embed = t2s.llm_embed
-        sig = embed.mean(axis=0).astype(np.float32)
-        if sig.shape[0] < self.d:
-            sig = np.pad(sig, (0, self.d - sig.shape[0]))
-        else:
-            sig = sig[:self.d]
-        ph = sig / (np.abs(sig).max() + 1e-9) * np.pi
-        hv = np.exp(1j * ph).astype(np.complex64)
-        self._llm_registry[name_prefix] = {
-            'tokenizer': tokenizer,
-            'model_id': model_id,
-            't2s': t2s,
-        }
-        # residual = name_prefix string (cheap pointer; t2s held in registry)
-        return hv, name_prefix
-
-    def _decode_llm(self, hv, residual):
-        """Return registry entry for absorbed LLM (lookup, not full restore)."""
-        return self._llm_registry.get(residual)
-
-    def generate(self, prompt, name_prefix=None, max_new=10, tokenizer=None):
-        """Pack 201: generate text via absorbed LLM (most-recent if no prefix).
-        Uses Pack 187 llama_forward_alpha path (substrate dequant on the fly).
-        """
-        if not self._llm_registry:
-            raise RuntimeError('no LLM absorbed; call udcp.absorb(model, modality="llm")')
-        if name_prefix is None:
-            name_prefix = list(self._llm_registry.keys())[-1]
-        entry = self._llm_registry[name_prefix]
-        tok = tokenizer or entry.get('tokenizer')
-        if tok is None:
-            raise ValueError('tokenizer required (pass tokenizer= or attach on absorb)')
-        t2s = entry['t2s']
-        ids = tok.encode(prompt)
-        for _ in range(int(max_new)):
-            logits = t2s.llama_forward_alpha(ids, name_prefix=name_prefix)
-            nxt = int(logits[-1].argmax())
-            ids.append(nxt)
-        return tok.decode(ids)
-
-    def absorb_llm(self, hf_model, tokenizer=None, model_id=None,
-                     name_prefix=None):
-        """Convenience: absorb LLM with tokenizer attached for generate()."""
-        if name_prefix is None:
-            name_prefix = f'udcp_llm_{len(self._llm_registry)}'
-        # encode directly so we can capture name_prefix + tokenizer
-        hv, np_used = self._encode_llm(hf_model, name_prefix=name_prefix,
-                                         tokenizer=tokenizer, model_id=model_id)
-        cid = self.counters['llm']
-        self.counters['llm'] += 1
-        hv_c = np.asarray(hv, dtype=np.complex64).reshape(-1)
-        loc_indices_list = []
-        for rep in range(self.ecc_replicas):
-            rot = self._ecc_rotation('llm', cid, rep)
-            hv_rot = hv_c * rot
-            addr = self._address('llm', cid, rep)
-            sims = (addr @ self.bank.Hconj.T).real
-            k = min(self.bank.k, len(sims))
-            loc_indices = np.argpartition(-sims, k - 1)[:k]
-            self.isw.write_namespace('llm', loc_indices, hv_rot)
-            loc_indices_list.append(loc_indices)
-        self.index[('llm', cid)] = {
-            'loc_indices': loc_indices_list,
-            'residual': np_used,
-            'name': name_prefix,
-            'hv_shape': hv_c.shape,
-        }
-        if self.keep_hv_store:
-            self.hv_store.setdefault('llm', {})[cid] = hv_c.copy()
-        return ('llm', cid), name_prefix
+    # llm codec methods (_encode_llm/_decode_llm/generate/absorb_llm) REMOVED
+    # (audit trio, Day-83): they rode the deleted t2s_compiler weight-bake path.
 
     # ── audit ─────────────────────────────────────────────────────────────
 

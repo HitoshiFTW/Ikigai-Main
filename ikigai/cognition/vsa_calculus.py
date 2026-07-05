@@ -181,12 +181,24 @@ class VSACalculus:
 
     def update_toward(self, hv, target_hv, lr=0.5):
         """
-        Nudge hv toward target_hv (Hebbian VSA step).
-        hv_new = sign(hv + lr * target_hv).
-        Equivalent to gradient descent on 1 - cosine(hv, target) in VSA algebra.
+        Nudge bipolar hv toward target_hv by flipping a fraction `lr` of the
+        currently-mismatched signs (Hebbian VSA step). Monotonic in cosine,
+        the correct bipolar analog of a gradient step on 1 - cosine(hv, target).
+
+        NOTE (Day-83 audit fix): the old form sign(hv + lr*target) was a NO-OP
+        for bipolar +-1 HVs at lr<1 -- a 0.5 nudge cannot flip a +-1 sign
+        (sign(1 - 0.5) = +1), so converge() never moved. Flip-fraction fixes it
+        while keeping lr in [0,1] and the gradient-descent semantics (lr=1 jumps
+        straight to target; small lr converges gradually).
         """
-        updated = hv.astype(np.float32) + lr * target_hv.astype(np.float32)
-        out = np.sign(updated).astype(np.float32)
+        hv = hv.astype(np.float32)
+        target_hv = target_hv.astype(np.float32)
+        out = hv.copy()
+        mismatch = np.where(np.sign(hv) != np.sign(target_hv))[0]
+        if len(mismatch):
+            k = max(1, int(round(float(lr) * len(mismatch))))
+            flip = mismatch[:k]
+            out[flip] = np.sign(target_hv[flip])
         out[out == 0.0] = 1.0
         return out
 
