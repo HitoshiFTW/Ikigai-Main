@@ -170,6 +170,23 @@ class SurfaceRealizer:
     def __init__(self):
         self.templates = {}      # relation -> majority frame (compat)
         self.variants = {}       # relation -> [frame, ...] distinct learned realizations (fluency)
+        # Day-105 CONSTRUCTION GENERALIZATION -- frames whose RELATION is itself a free slot
+        # `{R}`, e.g. ['{O}','is','the','{R}','of','{S}'].  Installed only once the organism has
+        # seen the SAME function-word skeleton used with MANY distinct relation-words (evidence
+        # the middle slot is productive), so a NEVER-SEEN relation parses one-shot: the speaker's
+        # own word fills {R}.  Not authored -- the org abstracts it over its observed data.
+        self.generic_frames = []
+
+    def install_generic(self, frames):
+        """Install productive-construction frames (each containing a `{R}` relation slot).
+        De-duped, order-preserving.  See the generalization gate in curiosity_frames."""
+        if getattr(self, 'generic_frames', None) is None:
+            self.generic_frames = []
+        for fr in frames:
+            fr = list(fr)
+            if fr not in self.generic_frames:
+                self.generic_frames.append(fr)
+        return len(self.generic_frames)
 
     def learn(self, pairs):
         """pairs: list of ((s, r, o), sentence).  Induce frames per relation by aligning the
@@ -205,6 +222,13 @@ class SurfaceRealizer:
                 return self._apply(vs[int(variant) % len(vs)], s, o)
         frame = self.templates.get(r)
         if not frame:
+            # no concrete frame for this relation -- if the organism has learned a productive
+            # construction, render it through the generic frame (fills {R} with the relation
+            # word).  This lets a NOVEL relation both verify (regeneration) and recall fluently.
+            gf = getattr(self, 'generic_frames', None) or []
+            if gf:
+                return ' '.join(s if t == '{S}' else (o if t == '{O}' else (r if t == '{R}' else t))
+                                for t in gf[0])
             return f"{s} {r} {o}"
         return self._apply(frame, s, o)
 
@@ -228,7 +252,11 @@ class SurfaceRealizer:
         # walk from the right to mark the final slot as greedy (absorb the tail)
         rev_last_idx = max(i for i, t in enumerate(frame) if t in ('{S}', '{O}')) if slots else -1
         for i, t in enumerate(frame):
-            if t == '{S}' or t == '{O}':
+            if t == '{R}':
+                # the RELATION slot (productive-construction frames): a SINGLE content token,
+                # not a span -- it names the relation, bounded by its function-word anchors.
+                parts.append(r'(?P<R>\w+)')
+            elif t == '{S}' or t == '{O}':
                 grp = 'S' if t == '{S}' else 'O'
                 greedy = '' if i == rev_last_idx else '?'      # last slot greedy, rest minimal
                 parts.append(rf'(?P<{grp}>.+{greedy})')
@@ -270,6 +298,21 @@ class SurfaceRealizer:
             if s and o:
                 anchors = sum(1 for ft in frame if ft not in ('{S}', '{O}'))
                 out.append((s, r, o, anchors))
+        # productive-construction frames LAST: the relation is CAPTURED from the sentence
+        # ({R} slot), so a never-seen relation reads one-shot.  Their literal-anchor count is
+        # lower than a concrete frame (which pins the relation word as an extra anchor), so a
+        # known relation's specific frame always outranks the generic parse for the same text.
+        for frame in (getattr(self, 'generic_frames', None) or []):
+            m = self._frame_regex(frame, lenient=lenient).match(sent)
+            if not m:
+                continue
+            gd = m.groupdict()
+            s = (gd.get('S') or '').strip()
+            o = (gd.get('O') or '').strip()
+            rr = (gd.get('R') or '').strip()
+            if s and o and rr:
+                anchors = sum(1 for ft in frame if ft not in ('{S}', '{O}', '{R}'))
+                out.append((s, rr, o, anchors))
         out.sort(key=lambda x: -x[3])
         return [(s, r, o) for (s, r, o, _) in out]
 

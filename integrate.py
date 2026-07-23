@@ -2803,7 +2803,7 @@ class IkigaiOrganism:
                 'interrogatives': sorted(interr)[:20]}
 
     def curiosity_frames(self, sentences, min_support=15, min_func=0.65, min_distinct=8,
-                         install=True):
+                         install=True, min_generalize=8, gen_min_support=5, gen_min_distinct=4):
         """Curiosity-gated frame induction -- learns relation surface-frames from raw text with
         NO pre-known facts, bypassing induce_surface_verified's known-fact wall (which could
         only verify 'capital' because the organism knew ~13 capitals).
@@ -2861,6 +2861,32 @@ class IkigaiOrganism:
                             ['the', R, 'of', '{S}', 'is', '{O}']]):
                     if fr not in sf.variants[R]:
                         sf.variants[R].append(list(fr))
+        # ── CONSTRUCTION GENERALIZATION (Day-105) ──────────────────────────────
+        # The genitive skeleton 'the {R} of {S} is {O}' was tried with EVERY content word as R.
+        # If MANY distinct relation-words survive the same functional-consistency test, the middle
+        # slot is PRODUCTIVE -- the org has evidence the construction generalizes over relations,
+        # not that any single word is special.  Then install a {R}-slot frame so a NEVER-SEEN
+        # relation ('the glorbf of qualan is dree') parses ONE-SHOT: the speaker's word fills {R}.
+        # This is abstraction over observed data (learning), NOT an authored rel=word_before_of rule.
+        productive = 0
+        for R, cnt in supp.items():
+            if cnt < gen_min_support:
+                continue
+            by_s = _c.defaultdict(_c.Counter)
+            for s, o in pairs[R]:
+                by_s[s][o] += 1
+            if len(by_s) < gen_min_distinct:
+                continue
+            func = sum(c.most_common(1)[0][1] / sum(c.values()) for c in by_s.values()) / len(by_s)
+            if func >= min_func:
+                productive += 1
+        if install and sf is not None and productive >= min_generalize:
+            if hasattr(sf, 'install_generic'):
+                sf.install_generic([['{O}', 'is', 'the', '{R}', 'of', '{S}'],
+                                    ['the', '{R}', 'of', '{S}', 'is', '{O}']])
+            # record the evidence on the organism (auditable; not part of the per-relation map)
+            self._generalized_construction = {'productive_relations': productive,
+                                              'construction': 'the {R} of {S} is {O}'}
         return out
 
     def ask_derive(self, question, depth=None):
