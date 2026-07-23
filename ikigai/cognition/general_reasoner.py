@@ -265,6 +265,38 @@ class GeneralReasoner:
         fast = self._fast_answer(text, toks, goal, do_multihop, do_derive)
         if fast is not None:
             return fast
+        # Day-100 -- ABSTENTION MUST BE CHEAP, OR IT IS NOT CALIBRATION.
+        #
+        # Nothing authoritative resolved. The path below then pays cat4.recall_action, whose cold
+        # `_pack280_build_recall_cache` walks EVERY anchor with two substrate recalls each --
+        # MEASURED 154s on the production organism -- and finishes by cleaning the query up over
+        # the 9.6k-word codebook, which returns the NEAREST WORD rather than nothing. Measured:
+        #
+        #     gr.reason('the capital of zqxlandia is')  -> 'succinctly'   after 152.74s
+        #
+        # That is a fabrication, and it is the expensive path that produces it. Searching 154s to
+        # emit a word the organism cannot ground is correct-or-abstain exactly backwards.
+        #
+        # So: if NOTHING the question mentions is an entity the organism holds a fact about, and no
+        # goal was given, it does not know -- and it can say so now, for ~139us. This is not a
+        # shortcut around the guarantee; it IS the guarantee, applied before the cost instead of
+        # after it. Anything with real grounding, a goal, or an arithmetic/derive/cache answer has
+        # already returned above or still takes the full path below.
+        #
+        # (full_capability's calibration probe passed only because 'z912qxland' carries DIGITS: the
+        # tokenizer splits it to ['z','912','qxland'] and that happened to miss. The alpha-only name
+        # the standing rule demands returns 'succinctly'. The gate was green on the tokenizer bug.)
+        if do_abstain and goal is None:
+            _org = getattr(self, 'org', None)
+            if _org is not None:
+                try:
+                    _grounded = any(_org.knows(t) for t in toks)
+                except Exception:
+                    _grounded = True          # never abstain because a probe errored
+                if not _grounded:
+                    return {'tokens': toks, 'answer': None, 'method': 'abstain_ungrounded',
+                            'icl_recalls': [], 'icl_action': None, 'magnitudes': [],
+                            'next_predict': []}
         # Build superposed state
         s0 = self.state_hv(toks)
         # Optional closure
@@ -511,6 +543,45 @@ class GeneralReasoner:
             from ikigai.cognition.calibration import abstain_boundary_n
             accept_sim = max(icl_min_state_sim,
                              abstain_boundary_n(self.d, n_action_vocab))
+
+        # Day-100 -- PARTIAL GROUNDING STILL FABRICATES. abstain_ungrounded (above) only fires when
+        # NOTHING in the question is a known entity. A question mentioning a known entity but an
+        # UNKNOWN relation ('the mayor of france is') still reaches here with icl_top_sim clearing
+        # accept_sim -- MEASURED: state_sim 0.282 vs boundary 0.2005 (n=9616) -- and returns the
+        # nearest codebook word ('phrasing') as if it were an answer, via the identical mechanism
+        # that produced 'succinctly'. The boundary is a GEOMETRIC noise floor; it cannot tell "this
+        # state is significantly similar to something" from "similar to the RIGHT thing" -- a
+        # superposed state built from ['the','mayor','of','france','is'] shares 4 of 5 tokens with
+        # a taught state like ['the','capital','of','france','is'], so function-word overlap alone
+        # clears the floor.
+        #
+        # The verifier is the organism's own knowledge, same move as induce_surface_verified: a
+        # soft (non-exact) recall is only trustworthy if the candidate word is a value the question
+        # already gives evidence for. Cheap (knows() is 139us) and it costs nothing when it doesn't
+        # apply -- if no token is a known entity, icl_verified stays True and the EARLIER
+        # abstain_ungrounded check has already handled that case.
+        icl_verified = True
+        if not icl_exact_cache and n_action_vocab > 1:
+            _org = getattr(self, 'org', None)
+            if _org is not None:
+                try:
+                    webs = {t: (_org.knows(t) or {}) for t in toks}
+                except Exception:
+                    webs = {}
+                known_ents = {t: w for t, w in webs.items() if w}
+                if known_ents:
+                    held = {str(v).strip().lower()
+                            for w in known_ents.values() for vals in w.values() for v in vals}
+                    held |= set(known_ents)                          # self-reference is not a lie
+                    icl_verified = False                              # verify the CANDIDATE below
+
+        def _verified(candidate):
+            if icl_verified:
+                return True
+            if candidate is None:
+                return False
+            return str(candidate).strip().lower() in held
+
         if self._fe_dispatch:
             # EMERGENT free-energy arbitration -- replaces the fixed if/elif order
             # below with a scalar competition (argmin F).  Exacts dominate (F=0,
@@ -541,17 +612,21 @@ class GeneralReasoner:
                     method = 'active_learn'
                 else:
                     props = []
-                    if icl_action_token is not None and icl_top_sim >= accept_sim:
+                    if (icl_action_token is not None and icl_top_sim >= accept_sim
+                            and _verified(icl_action_token)):
                         props.append(('b_self_icl', icl_action_token,
                                       self._free_energy(icl_top_sim)))
                     a, m = self._arbitrate(props)
                     if a is not None:
                         answer, method = a, m
+                    elif do_abstain:
+                        answer, method = 'unknown', 'abstain'
                     elif next_pred:
                         answer, method = next_pred[0][0], 'next_token'
             else:
                 props = []
-                if icl_action_token is not None and icl_top_sim >= accept_sim:
+                if (icl_action_token is not None and icl_top_sim >= accept_sim
+                        and _verified(icl_action_token)):
                     props.append(('b_self_icl', icl_action_token,
                                   self._free_energy(icl_top_sim)))
                 if plan and plan.get('success'):
@@ -561,7 +636,7 @@ class GeneralReasoner:
                 a, m = self._arbitrate(props)
                 if a is not None:
                     answer, method = a, m
-                elif do_abstain and icl_top_sim < accept_sim:
+                elif do_abstain:
                     answer, method = 'unknown', 'abstain'
                 elif next_pred:
                     answer, method = next_pred[0][0], 'next_token'
@@ -589,19 +664,21 @@ class GeneralReasoner:
                 icl_action_token = learned
                 icl_top_sim = 1.0
                 method = 'active_learn'
-            elif icl_action_token is not None and icl_top_sim >= accept_sim:
+            elif (icl_action_token is not None and icl_top_sim >= accept_sim
+                    and _verified(icl_action_token)):
                 answer = icl_action_token
                 method = 'b_self_icl'
             elif next_pred:
                 answer = next_pred[0][0]
                 method = 'next_token'
-        elif icl_action_token is not None and icl_top_sim >= accept_sim:
+        elif (icl_action_token is not None and icl_top_sim >= accept_sim
+                and _verified(icl_action_token)):
             answer = icl_action_token
             method = 'b_self_icl'
         elif plan and plan.get('success'):
             answer = plan.get('actions') or plan.get('trajectory')
             method = 'planner'
-        elif do_abstain and icl_top_sim < accept_sim:
+        elif do_abstain and (icl_top_sim < accept_sim or not _verified(icl_action_token)):
             # Pack 310 CALIBRATION -- recall similarity is below the
             # k-sigma boundary derived from the substrate geometry
             # (1/sqrt(2d)), i.e. statistically indistinguishable from
@@ -749,8 +826,15 @@ class GeneralReasoner:
             pass
         if not props:
             return None
-        props.sort(key=lambda p: p[2])
-        m, a, _f, icl, ex = props[0]
+        # Day-99 -- same order-invariance rule as _arbitrate (see its docstring). This path
+        # inlined `props.sort(...)[0]`, so fixing only _arbitrate would have left the ladder
+        # alive right here: the fast path is where most production queries actually resolve.
+        fmin = min(float(p[2]) for p in props)
+        best = [p for p in props if float(p[2]) <= fmin + 1e-12]
+        if len(best) > 1 and len({str(p[1]).strip().lower() for p in best}) > 1:
+            return None            # tied exacts DISAGREE -> no evidence to prefer one; do not
+                                   # let append-order pick. Fall through to the deliberate path.
+        m, a, _f, icl, ex = best[0]
         return self._fast_result(toks, a, m, icl=icl, exact=ex)
 
     # ---- Day 89: EMERGENT free-energy dispatch ----------------------------
@@ -765,6 +849,17 @@ class GeneralReasoner:
     # the geometric abstain boundary are preserved -- both are principled EFE
     # structure, not arbitrary priority.  Gated by _fe_dispatch; proven pixel
     # -identical to the ladder before it becomes default.
+    #
+    # HONESTY NOTE (Day-95 red-team, DS-DISPATCH): this REFORMULATES the ladder as
+    # argmin-over-costs; it does NOT remove the authored priority. All exact paths get a
+    # HARDCODED F=0.0 and TIE, broken by the stable-sort REGISTRATION ORDER
+    # (arith<derive<multihop<cache) -- identical to the old elif order; planner/next_token
+    # get hardcoded F constants (_F_PLANNER=10, _F_NEXT=20) reproducing the lower rungs; the
+    # literal if/elif ladder still exists below as the _fe_dispatch=False fallback; and the two
+    # were proven PIXEL-IDENTICAL (0 diffs). So do NOT sell this as "emergent" or "de-hardcoded":
+    # the ONLY genuinely competitive part is the soft-recall rung (real F=-log(sim) gated by the
+    # calibration boundary). Accurate description: "the dispatch ladder written as argmin over
+    # costs; behaviour unchanged; the soft-recall rung is confidence-gated."
     _fe_dispatch = True      # Day-89: emergent arbitration is DEFAULT (pixel-gated).
     _deep_dispatch = True    # Day-90: understand a goal-request -> plan competes in
                              # the SAME arbitration.  DEFAULT after pixel proof
@@ -800,13 +895,36 @@ class GeneralReasoner:
         return -math.log(c)
 
     def _arbitrate(self, proposals):
-        """proposals: list of (method, answer, free_energy).  Pick argmin F; stable
-        sort so equal-F (exact) proposals keep registration order.  Returns
-        (answer, method) or (None, None) if nothing proposed."""
+        """proposals: list of (method, answer, free_energy).  Pick argmin F.
+
+        Day-99 -- ORDER-INVARIANT.  It used to `sorted(...)[0]`, i.e. a stable sort whose
+        tie-break IS registration order.  Since every exact path is handed a LITERAL 0.0, all
+        four always tied, so the "argmin free-energy competition" resolved to arith<derive<
+        multihop<cache -- the original if/elif ladder, unchanged, wearing free-energy vocabulary.
+        MEASURED (day99_is_dispatch_emergent): the same two proposals at the same F returned
+        ANSWER_A when derive was appended first and ANSWER_B when cache was appended first. The
+        order decided the answer. F decided nothing.
+
+        Registration order is NOT evidence: it is an authored priority, and reading it as if it
+        were a decision is the DS-DISPATCH cheat the Day-95 red team named.  So ties are now
+        resolved by what the organism actually knows:
+          * unique argmin        -> that proposal wins (a real decision).
+          * tie, answers AGREE   -> consensus. Order-invariant, and genuine corroboration.
+          * tie, answers DIFFER  -> the organism has NO evidence to prefer one. It says so
+                                    (method='conflict') instead of silently taking whichever
+                                    path happened to be appended first. Correct-or-abstain
+                                    applied to arbitration itself.
+        Returns (answer, method), or (None, 'conflict'), or (None, None) if nothing proposed."""
         if not proposals:
             return None, None
-        best = sorted(proposals, key=lambda p: p[2])[0]
-        return best[1], best[0]
+        fmin = min(float(p[2]) for p in proposals)
+        best = [p for p in proposals if float(p[2]) <= fmin + 1e-12]
+        if len(best) == 1:
+            return best[0][1], best[0][0]
+        answers = {str(p[1]).strip().lower() for p in best}
+        if len(answers) == 1:
+            return best[0][1], '+'.join(sorted(str(p[0]) for p in best))
+        return None, 'conflict'
 
     # Pack 293 -- multi-hop question templates.  Specific by design so
     # false positives are near zero; anything else skips the multi-hop

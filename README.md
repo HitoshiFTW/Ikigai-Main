@@ -8,16 +8,37 @@ confabulating** when it can't.
 
 This repo is the working source of truth: the canonical organism (`ikigai.py`),
 the cognition stack (`ikigai/`), the public API (`integrate.py`), a one-command
-reproducible benchmark (`benchmark.py`), and runnable experiments for each claim.
+reproducible benchmark (`benchmark.py`), the wild-deployment server
+(`experiments/wild/`), and runnable experiments for each claim.
 
 > Solo research prototype by Prince Siddhpara (17), Mura ALife Labs. No published
-> paper yet, but the full three-month write-up (`NeuroSeed_3Month_Report.md`) and
-> the unedited daily logs (`daily_logs/`, Day 001 to Day 090) are in this repo.
+> paper yet, but the full write-up (`NeuroSeed_3Month_Report.md`) is in this repo.
 > Everything below is something you can run and check yourself -- that is the point.
+
+---
+
+## Try it live
+
+Ikigai is **live on the internet**, running the full organism on a single $5 CPU
+box. Talk to it, ask it a fact, or teach it something and watch it remember:
+
+> **https://ikigai.mura-alife.com**
+
+It answers what it can ground, says **"I don't know"** when it can't (no
+confabulation), learns continually from whoever talks to it, and knows who it is
+("who are you"). Nothing is stubbed -- the same 8-bank Kanerva substrate, derive
+engine and calibration you run below is what answers you there. The live server is
+`experiments/wild/serve.py`; the from-zero deployment guide is
+`experiments/wild/DEPLOY.md` (Docker + VPS + Cloudflare).
+
+---
 
 > **Runs on any PC.** `pip install -r requirements.txt` then `python benchmark.py`.
 > CPU only, no GPU, no pretrained body to download (the benchmark trains a fresh
 > organism live). Paths are module-relative; there is nothing machine-specific.
+> The full trained body (`organism.ikg`) is a **Release asset** (too big for a git
+> commit) -- grab it from the Releases tab only if you want to run the pretrained
+> organism instead of a fresh one.
 
 ---
 
@@ -109,8 +130,10 @@ boundary for honest abstention. Constant RAM regardless of data volume. CPU-only
 | `ikigai/cognition/frame_relax.py` | Frame-then-fill generator (free-fluency, message-first). |
 | `ikigai/cognition/flat_memory.py` | The VSA-SDM substrate. |
 | `experiments/` | Runnable demos. Each prints `[PASS]/[FAIL]` per verification + a summary. |
-| `NeuroSeed_3Month_Report.md` | Three-month report (Day 1 to 90): goal, measured results, honest wins/losses, roadmap. |
-| `daily_logs/` | Full daily research logs, Day 001 to Day 090. The unedited trail. |
+| `experiments/wild/serve.py` | The live-deployment server. Releases the organism into the open world: answers / abstains / learns from every stranger, correct-or-abstain public door, persists its wild life to a separate file (production body stays read-only). |
+| `experiments/wild/DEPLOY.md` | From-zero deployment guide: Docker + VPS + Cloudflare. |
+| `Dockerfile` | Container for the live server (numpy + psutil only). |
+| `NeuroSeed_3Month_Report.md` | Report: goal, measured results, honest wins/losses, roadmap. |
 
 ---
 
@@ -228,9 +251,9 @@ the edges:
 - **Fluent open-ended prose** is mechanism-complete but data-limited -- grammar
   is solved on clean input; shipping fluent generation needs a prose corpus, not
   a new mechanism.
-- The shipped 182 MB trained body (`organism.ikg`) is **not** in this repo
-  (GitHub's 100 MB file cap); the benchmark trains a fresh organism live, so you
-  don't need it.
+- The shipped trained body (`organism.ikg`, ~190 MB) is **not** a git commit
+  (GitHub's 100 MB file cap) -- it ships as a **Release asset** instead. The
+  benchmark trains a fresh organism live, so you don't need it to run anything here.
 
 ---
 

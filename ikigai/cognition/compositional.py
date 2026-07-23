@@ -117,10 +117,15 @@ class CompositionEngine:
         # the rule miner needs this structured view.  It self-populates
         # whenever atom() resolves a hit (no curated lists).  Persisted on
         # the organism so it survives reloads.
-        self.triples = {}        # (subj, rel) -> val   (enumerable atoms)
+        self.triples = {}        # (subj, rel) -> val   MINING INDEX (bounded), not the fact store
         self.entities = set()    # discovered subjects
         self.relations = set()   # discovered relations
         self.learned_rules = []  # promoted derivation rules (dicts)
+        # Day-96 -- the mining index is a SAMPLE, not a store. Unbounded it silently became the
+        # fact store (4.16M Wikidata edges as python string keys = 662 B/edge -> 3.5 GB). The rule
+        # miner needs a universe to mine, not every fact; bulk facts live in `addr` at 5.3 B/edge.
+        self._triples_cap = 250_000
+        self.addr = None         # AddressFactStore: packed bulk graph facts (attach_addresses)
         # When True (test/proof mode), inheritance derivations require a
         # LEARNED rule -- proves discovery is load-bearing, not the
         # authored regex.  Default False so 304/304.1 behaviour holds.
@@ -159,9 +164,26 @@ class CompositionEngine:
         rel = str(rel).strip().lower()
         if not subj or not val:
             return
+        # Day-96 -- `triples` is the MINING INDEX, not the fact store. Its job is to give the rule
+        # miner an enumerable universe; the facts themselves live in the anchor cache (exact) and,
+        # for bulk graph relations, in the packed address store (5.3 B/edge). Left unbounded it
+        # silently became the fact store: 4.16M Wikidata edges of python STRING keys = 662 B/edge
+        # -> 3.5 GB RSS. A miner does not need the universe, it needs a SAMPLE -- so bound it.
+        if (subj, rel) not in self.triples and len(self.triples) >= self._triples_cap:
+            self.relations.add(rel)      # relations are few; entities are NOT (3.5M strings = ~300 MB)
+            return
         self.triples[(subj, rel)] = val
-        self.entities.add(subj)
+        self.entities.add(subj)          # `entities` == "the cache/mining universe", stays bounded
         self.relations.add(rel)
+
+    def attach_addresses(self, store):
+        """Day-96 -- back the atom layer with the PACKED ADDRESS STORE (AddressFactStore) for bulk
+        graph relations. Facts become three indices over a shared lexicon (5.3 B/edge, measured)
+        instead of python strings in a dict (662 B/edge). atoms()/atom() fall through to it, so
+        transitive_reach derives the COMPLETE closure over ALL edges without the cache holding
+        millions of entries."""
+        self.addr = store
+        return store
 
     # ---- atom layer (read-only over the cache) ----------------------
 
@@ -192,8 +214,6 @@ class CompositionEngine:
             return None
         from ikigai.cognition.cat4_absorb import _stable_anchor
         cat4 = getattr(self.gr.org, 'cat4', None)
-        if cat4 is None or not getattr(cat4, 'anchor_actions', None):
-            return None
         ent = str(entity).strip().lower()
         # Day-87 -- counterfactual intervention: a temporarily installed override
         # replaces one atom so the SAME derive-chaining flows over the intervened
@@ -203,6 +223,20 @@ class CompositionEngine:
             hit = ov.get((ent, str(rel).strip().lower()))
             if hit is not None:
                 return hit
+        # Day-99 -- the packed store is consulted BEFORE the anchor-cache guard. It used to sit
+        # below `if not cat4.anchor_actions: return None`, so on an organism whose knowledge came
+        # ONLY from a bulk ingest the cache is empty and atom() returned None without ever asking
+        # the store -- measured: reach_addressed found {korumimek, rumikodor} while atom() said None
+        # and compose() said "unknown". The store needs no cache to answer; it is its own index.
+        _si = self._addr_id(rel, ent)                # Day-99: store authoritative for THIS entity
+        if _si is not None:
+            vals = self._addr_objects(rel, _si)      # int id -> objects_of skips a second id_of
+            if vals:
+                self._stats['atom_hits'] += 1
+                return vals[-1]                      # no _record: the store IS the index here
+            return None
+        if cat4 is None or not getattr(cat4, 'anchor_actions', None):
+            return None
         for tmpl in templates:
             q = tmpl.format(e=ent)
             toks = self.gr.tokenize(q)
@@ -223,10 +257,20 @@ class CompositionEngine:
         Read-only. Returns [] if none."""
         from ikigai.cognition.cat4_absorb import _stable_anchor
         cat4 = getattr(self.gr.org, 'cat4', None)
-        if cat4 is None or not getattr(cat4, 'anchor_actions', None):
-            return []
         ent = str(entity).strip().lower()
         out = []
+        # Day-96 -- consult the anchor cache ONLY for entities it actually holds. `entities` is the
+        # cache/mining universe (bounded); a bulk entity that lives only in the packed store is not
+        # in it. Skipping the miss path for those is not just speed (the miss costs a template
+        # format + tokenize + anchor hash PER NODE -- measured 541 us/query on Wikidata closures);
+        # it is also what keeps the walk O(packed lookup) at scale.
+        # Day-99 -- asked BEFORE the cat4 guard: the store is its own index and needs no cache, and
+        # an organism taught only by bulk ingest has an EMPTY cache (see atom()).
+        _si = self._addr_id(rel, ent)
+        if _si is not None:
+            return self._addr_objects(rel, _si)      # store authoritative for THIS entity (int id)
+        if cat4 is None or not getattr(cat4, 'anchor_actions', None):
+            return []
         for tmpl in self._templates_for(rel):
             entry = cat4.anchor_actions.get(
                 _stable_anchor(self.gr.tokenize(tmpl.format(e=ent))))
@@ -235,6 +279,92 @@ class CompositionEngine:
                     v = ' '.join(toks).strip().lower()
                     if v and v not in out:
                         out.append(v)
+        return out
+
+    def _rel_packed(self, rel, ent=None):
+        """Day-96/99 -- is the packed address store authoritative for this lookup?
+
+        Day-96 scoped authority to the RELATION: the store was built from the COMPLETE edge set of
+        that relation, so it holds every fact of it. The anchor cache must then be skipped, for two
+        independent reasons:
+
+        1. CORRECTNESS. The cache stores a value as a TOKEN-JOIN, and the tokenizer drops digits
+           (`[^\\W\\d_]+`). A Wikidata id 'Q12345' round-trips through it as 'q'. Merging those
+           mangled values into a closure injects junk nodes -- measured 44/500 closures wrong.
+        2. SPEED. A cache lookup for a bulk entity is a guaranteed MISS that still pays a template
+           format + tokenize + anchor hash PER NODE -- measured 541 us/query on Wikidata closures.
+
+        Gated on the RELATION, never on `self.entities`: that set is populated BY successful atom()
+        hits, so gating on membership in it blocks every not-yet-seen entity and silently kills rule
+        mining (measured: is_transitive('p279') flipped True -> False).
+
+        Day-99 -- RELATION-WIDE authority was a real bug, and the docstring above carries the wrong
+        assumption that caused it: "built from the COMPLETE edge set" is true for a ONE-SHOT bulk
+        load and FALSE the moment any other door teaches that relation. Measured: with a Wikidata-
+        style store attached for `isa`, a fact taught by ingest_triples/study/mem.teach about an
+        entity the store has never heard of became INVISIBLE -- `compose` went from "The barukozin
+        is a rukobamek, and ultimately a kobarudor" to "The barukozin is unknown". The organism did
+        not fabricate (calibration held), it FORGOT. That silently breaks every "feed data and keep
+        learning" workflow.
+
+        So authority is now scoped to the (relation, ENTITY): the store speaks only for entities it
+        actually holds.
+          * entity IN the store  -> store authoritative, cache skipped. Both Day-96 reasons still
+            apply in full: no digit-mangled cache junk, no per-node miss penalty. Wikidata keeps its
+            correctness and its 56 us/query.
+          * entity NOT in the store -> the store has nothing to say; consult the cache. Additivity
+            restored: a newly taught entity is visible again.
+        Cost is one id_of() hash lookup, which objects_of() already pays internally.
+
+        Honest residual gap (named, not hidden): a NEW fact taught via the cache about an entity the
+        store ALREADY holds stays invisible, because the store still speaks for that entity. Closing
+        that needs a write path into the store, not a read-order change."""
+        if ent is None:                       # relation-level question (has this store got `rel`?)
+            st = self.addr
+            if st is None:
+                return False
+            try:
+                return st.has_relation(rel)
+            except Exception:
+                return False
+        return self._addr_id(rel, ent) is not None
+
+    def _addr_id(self, rel, ent):
+        """Day-99 -- resolve `ent` to the packed store's int id IFF the store is authoritative for
+        (rel, ent); else None.  Callers pass the returned INT straight to _addr_objects.
+
+        Resolving ONCE matters.  objects_of() already does its own id_of(), so the naive form --
+        ask _rel_packed (id_of), then call _addr_objects with the STRING (id_of again) -- pays the
+        hash twice: measured +1.95 us/atom, +20.3% on real Wikidata p279 edges.  Handing the int
+        down skips the second lookup and makes entity-scoped authority cost nothing over the old
+        relation-scoped path."""
+        st = self.addr
+        if st is None:
+            return None
+        try:
+            if not st.has_relation(rel):
+                return None
+            return st.id_of(str(ent).strip().lower())
+        except Exception:
+            return None
+
+    def _addr_objects(self, rel, ent):
+        """Day-96 -- objects of (ent, rel) from the PACKED ADDRESS STORE (5.3 B/edge) when the
+        anchor cache does not hold them. This is what lets bulk graph knowledge (Wikidata-scale)
+        stay OUT of the 290-B/entry cache while remaining fully derivable. Returns [] if no store
+        is attached or the relation is not in it."""
+        st = self.addr
+        if st is None:
+            return []
+        try:
+            ids = st.objects_of(ent, str(rel).strip().lower())
+        except Exception:
+            return []
+        out = []
+        for i in ids:
+            s = st.str_of(i)
+            if s and s not in out:
+                out.append(s)
         return out
 
     def reverse_atom(self, rel, value):
@@ -292,6 +422,30 @@ class CompositionEngine:
             return self.reverse_atom(inv, x)
         return None
 
+    def _chain_inner_all(self, rel, x):
+        """Day-96 -- ALL parents of x under rel, not just one.
+
+        `_chain_inner` resolves ONE value via atom(), which returns entry[-1] -- the LAST value the
+        anchor cache holds.  But the cache is MULTI-VALUED (atoms(), Pack 329): 'zebu isa kolu' AND
+        'zebu isa mira' are both stored.  Following only the last one silently DROPS every other
+        parent, so a transitive closure over a multi-parent taxonomy came back INCOMPLETE -- the
+        organism would answer 'no, zebu is not a kolu' when it demonstrably is.  For a
+        correct-or-abstain system an omission that reads as a confident 'no' is the worst failure
+        mode there is, and on Wikidata p279 (4.16M edges, 3.52M subjects) ~15% of edges are
+        multi-parent.  This returns the full parent set so the closure can BFS over all of them.
+        """
+        vals = self.atoms(rel, x)
+        if vals:
+            # keep the miner's enumerable universe fed exactly as atom() did (it recorded the
+            # value it returned, i.e. the last one) -- mining behaviour is unchanged.
+            self._record(str(x).strip().lower(), rel, vals[-1])
+            return vals
+        inv = self.sanctioned_inverse(rel)
+        if inv:
+            v = self.reverse_atom(inv, x)
+            return [v] if v else []
+        return []
+
     def is_transitive(self, rel):
         """Pack 317.2 -- True if a LEARNED transitive rule covers `rel`."""
         rel = self._norm_rel(rel)
@@ -315,17 +469,41 @@ class CompositionEngine:
         if not self.is_transitive(rel):
             return None
         if max_depth is None:
-            max_depth = len(self.entities) + 2     # longest acyclic chain
-        chain = [str(x).strip().lower()]
-        seen = {chain[0]}
-        cur = chain[0]
+            # longest acyclic chain. With a packed store attached, the entity universe is ITS
+            # lexicon (millions), not the bounded mining index -- otherwise the walk would stop
+            # short of the root on bulk graphs.
+            n_ent = len(self.entities)
+            if self.addr is not None:
+                n_ent = max(n_ent, getattr(self.addr, 'n_entities', 0))
+            max_depth = n_ent + 2
+        # Day-96 -- BFS over ALL parents, not a single-parent chain. The old walk took one value
+        # per hop (atom() = the cache's LAST value), so a node with two parents lost one of them
+        # and every ancestor above it: transitive_reach('isa','zebu') returned ['zebu','mira',
+        # 'rulo'] while the truth is {kolu, mira, pova, rulo}. Return shape is UNCHANGED --
+        # [x, *ancestors] -- so every caller's chain[1:] still means "the ancestors of x", it is
+        # now simply COMPLETE. Still derive-not-store and convergence-bounded (stops at roots).
+        x0 = str(x).strip().lower()
+        # Day-96 -- when the relation lives in the packed store, let the STORE walk it. It closes in
+        # ID space; the engine's generic walk closes in STRING space, paying a blake2b + bisect
+        # (str->id) and a blob decode (id->str) on EVERY hop -- measured 189 us/query vs 14 us for
+        # the same closure in id space. Convert to surface strings ONCE, at the end.
+        if self._rel_packed(rel):
+            st = self.addr
+            return [x0] + [s for s in (st.str_of(i) for i in st.transitive_reach(rel, x0)) if s]
+        chain = [x0]
+        seen = {x0}
+        frontier = [x0]
         for _ in range(int(max_depth)):
-            nxt = self._chain_inner(rel, cur)
-            if not nxt or nxt in seen:      # stop at root or cycle (converged)
+            nxt = []
+            for cur in frontier:
+                for nb in self._chain_inner_all(rel, cur):
+                    if nb and nb not in seen:
+                        seen.add(nb)
+                        chain.append(nb)
+                        nxt.append(nb)
+            if not nxt:                      # converged: every branch hit a root or a cycle
                 break
-            chain.append(nxt)
-            seen.add(nxt)
-            cur = nxt
+            frontier = nxt
         return chain
 
     def transitive_related(self, rel, x, target):

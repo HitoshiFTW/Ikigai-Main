@@ -1,0 +1,23 @@
+# keep the build context small + fast: exclude everything the runtime doesn't need.
+# (the Dockerfile COPYs only integrate.py, ikigai/, experiments/wild/, organism.ikg)
+.git
+.gitignore
+videos/
+github/
+Research_Log/
+AUDIT_*/
+_audit_backup/
+scratchpad/
+*.md
+# other experiments (we only ship experiments/wild) -- but DON'T drop wild itself
+experiments/audit/
+experiments/nl/
+experiments/vcc/
+experiments/day*/
+# the wild life + field notes are runtime state, not build inputs
+experiments/wild/wild_organism.ikg
+experiments/wild/ethology.jsonl
+# python caches
+**/__pycache__/
+**/*.pyc
+*.log

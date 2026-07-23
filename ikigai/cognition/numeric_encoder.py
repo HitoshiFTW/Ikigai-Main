@@ -151,3 +151,83 @@ class NumericEncoder:
         self.scale = float(st['scale'])
         self.seed = int(st['seed'])
         self.phases = np.asarray(st['phases'], dtype=np.float32)
+
+
+class SpatialScene:
+    """Day 94 -- a SCENE on the FHRR substrate via Spatial Semantic Pointers (Komer & Eliasmith).
+
+    The SAME substrate that holds symbolic taxonomy holds CONTINUOUS 2-D position: an object at
+    (x,y) is the phasor SSP(x,y) = X^x (.) Y^y (Hadamard of two Fractional-Power-Encoded axes).  A
+    scene is ONE holographic memory  M = SUM_o  name_o (.) SSP(x_o,y_o).  Position is read back by
+    unbinding (resonance); PROXIMITY is substrate similarity (no coordinates compared); and the
+    base spatial relations feed the organism's existing derive engine, which composes them
+    (right-of / above / between) exactly as it composes is-a.  Generalization off the text axis --
+    zero new mechanism.
+
+        sc = SpatialScene(); sc.add('a', 3, 5).add('b', 9, 2)
+        sc.where('a')                 -> (3, 5)       (decode from the scene memory)
+        sc.nearest(4, 6)              -> 'a'          (SSP resonance)
+        org.ingest_triples(sc.base_facts(), discover=True)   -> derive-engine spatial composition
+    """
+
+    def __init__(self, d=1024, scale=6.0, seed=101):
+        self.d = int(d)
+        self.encX = NumericEncoder(d=d, scale=scale, seed=seed)
+        self.encY = NumericEncoder(d=d, scale=scale, seed=seed + 101)
+        self.objs = {}            # name -> (x, y)
+        self._ssp = {}            # name -> SSP phasor
+
+    def ssp(self, x, y):
+        """Spatial Semantic Pointer for a point: bind the two axis codes (Hadamard product)."""
+        return (self.encX.encode(float(x)) * self.encY.encode(float(y))).astype(np.complex64)
+
+    def add(self, name, x, y):
+        name = str(name).strip().lower()
+        self.objs[name] = (float(x), float(y))
+        self._ssp[name] = self.ssp(x, y)
+        return self
+
+    def _name_hv(self, name):
+        r = np.random.default_rng(abs(hash(('ssp:name', name))) % (2 ** 31))
+        return np.exp(1j * r.uniform(-np.pi, np.pi, self.d)).astype(np.complex64)
+
+    def memory(self):
+        """The whole scene as ONE holographic phasor memory."""
+        M = np.zeros(self.d, dtype=np.complex64)
+        for n in self.objs:
+            M += self._name_hv(n) * self._ssp[n]
+        return M
+
+    def where(self, name, x_max=None, y_max=None):
+        """Recover an object's (x,y) by unbinding the scene memory and decoding on a grid."""
+        name = str(name).strip().lower()
+        if name not in self.objs:
+            return None
+        M = self.memory()
+        rec = M * np.conj(self._name_hv(name))
+        xm = int(x_max if x_max is not None else max((v[0] for v in self.objs.values()), default=16)) + 1
+        ym = int(y_max if y_max is not None else max((v[1] for v in self.objs.values()), default=16)) + 1
+        best, bxy = -1e9, (0, 0)
+        for x in range(xm + 1):
+            cx = self.encX.encode(x)
+            for y in range(ym + 1):
+                s = float((np.conj(cx * self.encY.encode(y)) * rec).mean().real)
+                if s > best:
+                    best, bxy = s, (x, y)
+        return bxy
+
+    def nearest(self, x, y):
+        """Nearest object to a point by SSP RESONANCE (proximity = substrate similarity)."""
+        if not self.objs:
+            return None
+        q = self.ssp(x, y)
+        return max(self.objs, key=lambda n: float((np.conj(self._ssp[n]) * q).mean().real))
+
+    def base_facts(self):
+        """Immediate 'rightof' (x) and 'above' (y) neighbor chains -- feed to the derive engine,
+        whose transitive closure + composition then answers right-of / above / between queries."""
+        names = list(self.objs)
+        bx = sorted(names, key=lambda n: self.objs[n][0])
+        by = sorted(names, key=lambda n: self.objs[n][1])
+        return ([(bx[i], 'rightof', bx[i + 1]) for i in range(len(bx) - 1)] +
+                [(by[i], 'above', by[i + 1]) for i in range(len(by) - 1)])

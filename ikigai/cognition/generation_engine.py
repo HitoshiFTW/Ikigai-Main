@@ -353,3 +353,154 @@ class GenerationEngine:
             self.org.unified, 'assert_relation') else None
         for _ in range(n):
             self.org.unified.relate(hypo, role, target)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Day 93/94 -- GENERATION-AS-SEARCH + FREE-ENERGY PLANNING (native engines)
+#
+# Generation/coherence is a SEARCH property, not a learned token distribution.
+# These are the wired-by-default engines proven on Day 93/94:
+#   * SubstratePolicy   -- Day-94 #5: a holographic associative policy memory
+#                          (bind/bundle/cosine-cleanup, Hebbian, NO backprop) that
+#                          BIASES variation from the substrate's own geometry.
+#   * verified_search   -- Day-93 #8: cheap variation + exact verify -> select/abstain.
+#                          Correct-or-abstain BY CONSTRUCTION (cannot hallucinate).
+#   * plan_order        -- Day-94 #6: order interdependent items by expected-free-energy
+#                          argmin (active-inference) -> global consistency, no BFS.
+#   * plan_discourse    -- Day-94 #7: order derived facts toward a communicative goal,
+#                          coherent (entity continuity) AND landing the goal.
+# ══════════════════════════════════════════════════════════════════════════
+
+from ikigai.cognition.vsa_calculus import _hv_for as _vsa_hv, _bind as _vsa_bind
+from ikigai.cognition.fe_action import FreeEnergyActionSelector
+
+
+class SubstratePolicy:
+    """Day-94 #5 -- the substrate proposer.  A REAL-valued holographic associative memory over
+    the substrate's bind/unbind + cosine-cleanup primitives.  Learns a state->action bias online
+    by Hebbian superposition (NO backprop, NO gradient); proposes an action for a state by
+    unbinding the memory with the state vector and cleaning up against the action codebook, then
+    sampling (temperature keeps exploration diversity).  Beats blind variation at equal budget
+    when the credit is directional (reinforce the moves that reduced the objective).
+
+        pol = SubstratePolicy(); pol.reinforce(state_key, action_key)  # on a good move
+        a  = pol.propose(state_key, actions)                            # sample a next action
+    """
+
+    def __init__(self, d=512, temp=0.6, seed=94):
+        self.d = d
+        self.temp = temp
+        self.M = np.zeros(d, dtype=np.float64)      # real-valued (count-weighted, not sign-collapsed)
+        self._rng = np.random.default_rng(seed)
+        self._shv, self._ahv = {}, {}
+
+    def _state_hv(self, key):
+        if key not in self._shv:
+            self._shv[key] = _vsa_hv(f'st:{key}', self.d)
+        return self._shv[key]
+
+    def _act_hv(self, key):
+        if key not in self._ahv:
+            self._ahv[key] = _vsa_hv(f'act:{key}', self.d)
+        return self._ahv[key]
+
+    def reinforce(self, state_key, action_key):
+        """Hebbian: superpose bind(state, action) into the memory (a good transition)."""
+        self.M += _vsa_bind(self._state_hv(str(state_key)), self._act_hv(str(action_key)))
+
+    def scores(self, state_key, actions):
+        """Unbind the memory with the state (+-1 self-inverse bind = elementwise multiply) and
+        score each candidate action by resonance (dot with its codebook vector)."""
+        q = self.M * self._state_hv(str(state_key))
+        return np.array([float(np.dot(q, self._act_hv(str(a)))) for a in actions])
+
+    def propose(self, state_key, actions):
+        """Sample an action for `state_key` from the resonance distribution (temperature-softmax)."""
+        if not actions:
+            return None
+        if not self.M.any():
+            return actions[int(self._rng.integers(len(actions)))]     # cold: uniform
+        s = self.scores(state_key, actions)
+        s = s - s.max()
+        p = np.exp(s / (self.temp * (np.abs(s).mean() + 1e-6)))
+        p = p / p.sum()
+        return actions[int(self._rng.choice(len(actions), p=p))]
+
+
+def verified_search(propose, verify, budget=2000):
+    """Day-93 #8 -- generation-as-search-under-verification.  Draw cheap candidates from
+    `propose()`; keep the FIRST that `verify(cand)` accepts; ABSTAIN (None) after `budget`.
+    Because the verifier gates the output, the result is CORRECT-OR-ABSTAIN by construction --
+    it cannot emit an unverified (hallucinated) answer.  Variation + selection (immune/evolution),
+    not a BFS/backtracker.  Returns (solved, tries, answer|None)."""
+    for t in range(1, int(budget) + 1):
+        cand = propose()
+        if cand is None:
+            continue
+        if verify(cand):
+            return True, t, cand
+    return False, int(budget), None
+
+
+def plan_order(items, deps, lam=0.3, d=64):
+    """Day-94 #6 -- structure-first planning.  Order `items` (any hashables) so each is placed
+    only after its prerequisites, by minimizing expected free energy at each step:
+      pragmatic  = +1 if all deps already placed else a violation penalty (readiness dominates)
+      epistemic  = how many other items this one unlocks (downstream fan-out, info gain)
+    One forward pass, argmin-EFE via FreeEnergyActionSelector (the active-inference substrate op);
+    NO backtracking, NO BFS.  `deps`: dict item -> iterable of prerequisite items.  Returns the
+    ordered list (a valid topological order when the graph is acyclic)."""
+    sel = FreeEnergyActionSelector(d=d)
+    deps = {k: set(v) for k, v in (deps or {}).items()}
+    fan = {}
+    for it, ps in deps.items():
+        for p in ps:
+            fan[p] = fan.get(p, 0) + 1
+    max_fan = max(fan.values()) if fan else 1
+    remaining = list(items)
+    placed = set()
+    order = []
+    while remaining:
+        cands = []
+        for it in remaining:
+            ready = deps.get(it, set()).issubset(placed)
+            prag = 1.0 if ready else -5.0                       # violation cost dominates
+            epi = fan.get(it, 0) / max_fan
+            cands.append((it, epi, prag))
+        best = sel.select_from_values(cands, lam=lam)[0][0]
+        order.append(best)
+        remaining.remove(best)
+        placed.add(best)
+    return order
+
+
+def plan_discourse(facts, topic, goal, lam=1.0, d=64, entities_of=None):
+    """Day-94 #7 -- goal-driven discourse planning.  Order derived `facts` so the discourse is
+    coherent (each fact shares an entity with the previous focus = given->new continuity) AND
+    LANDS on `goal` (the communicative point).  argmin-EFE selection: epistemic = entity
+    continuity with the current focus; pragmatic = goal-timing (hold the goal fact until last).
+    `facts`: list of (s, r, o) triples (or pass `entities_of` to extract entities from custom
+    items).  `topic`: the entity to open on.  `goal`: the fact to end on.  Returns ordered facts."""
+    def ents(f):
+        if entities_of is not None:
+            return set(entities_of(f))
+        return {f[0], f[2]}
+    sel = FreeEnergyActionSelector(d=d)
+    remaining = list(facts)
+    order = []
+    focus = {topic}
+    while remaining:
+        cands = []
+        for f in remaining:
+            cont = len(ents(f) & focus)
+            if f is goal or f == goal:
+                prag = 2.0 if len(remaining) == 1 else -5.0     # hold the goal until last
+            else:
+                prag = 0.0
+            cands.append((id(f), cont, prag))
+        best_id = sel.select_from_values(cands, lam=lam)[0][0]
+        best = next(f for f in remaining if id(f) == best_id)
+        order.append(best)
+        remaining.remove(best)
+        focus = ents(best)
+    return order

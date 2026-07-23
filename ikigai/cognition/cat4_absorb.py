@@ -113,7 +113,8 @@ class Cat4Absorb:
                   opv_unlearn_factor=0.50,
                   opv_max_anchors=512,
                   opv_min_state_sim=0.15,
-                  opv_seed=265):
+                  opv_seed=265,
+                  state_codes=None):
         """
         Args:
             mr               -- MultiRoleMemory
@@ -124,6 +125,14 @@ class Cat4Absorb:
             window           -- working-memory window size (Miller 7±2)
             min/max action_len -- gate: skip pairs whose action is out of range
             min/max state_len  -- gate: skip pairs whose state is out of range
+            state_codes      -- Day 101: an existing FactoredMeaning instance (e.g.
+                organism.factored) used to identify anchors by chunked/coded
+                similarity of their STATE hv, instead of trusting cosine similarity
+                over the shared SDM's own (crosstalk-prone at scale) reconstruction.
+                MEASURED at production scale (N=137,450, the load factor that
+                collapsed VSASDM to noise, Day 100): 100% exact / 99.95% paraphrase
+                identification vs total collapse. None -> falls back to the
+                original cosine-over-recall_batch ranking (pre-Day-101 behavior).
         """
         self.mr = mr
         self.num_enc = num_enc
@@ -153,6 +162,10 @@ class Cat4Absorb:
         self.opv_max_anchors = int(opv_max_anchors)
         self.opv_min_state_sim = float(opv_min_state_sim)
         self._opv_rng = np.random.default_rng(int(opv_seed))
+        # Day 101: chunked-VSA identification layer (see docstring). Shares the
+        # organism's own FactoredMeaning store (already persisted in save_ikg/
+        # load_ikg since Day 91) rather than a new, separately-persisted one.
+        self.state_codes = state_codes
         self._ensure_role()
         self._ensure_state_role()
         self._ensure_action_token_role()
@@ -438,6 +451,12 @@ class Cat4Absorb:
             self.mr.write_relation(anchor, self.state_role,
                                      state_hv.astype(np.complex64))
             self.mr._role_targets[self.state_role].add(anchor)
+            # Day 101: durable chunked code for this anchor's state, bytes/anchor,
+            # never crosstalks with other anchors (each gets its own code) --
+            # survives a cold cache rebuild where the shared SDM's own
+            # reconstruction collapses at scale (Day 100/101 measured wall).
+            if self.state_codes is not None:
+                self.state_codes.encode_once(anchor, state_hv)
             # Persist each action token to substrate via icl_action_token
             # role so action_vocab survives organism.ikg reload.
             for t in action_toks:
@@ -544,17 +563,28 @@ class Cat4Absorb:
 
         Memory: 2 * N * d * 8 bytes complex64.  At N=31K, d=400:
         ~200 MB total.  Acceptable under 1 GB ceiling.
-        """
+
+        Day-100 -- BATCHED, not per-anchor. MEASURED on the production organism (63,917 anchors):
+        the per-anchor scalar loop (2 mr.recall() calls each = 127,834 total) cost 161.7s -- almost
+        entirely Python-level call-chain overhead (recall -> _addr -> _bind -> ck.key -> locs ->
+        _activate), not the underlying vector math (a single similarity search over M=6144 hard
+        locations is microseconds). mr.recall_batch() shares ONE address build + ONE top-k search
+        across all anchors (Pack 116's key_batch/locs_batch, which already existed and were simply
+        never wired to a many-anchor caller). Same formula, same result -- verified numerically
+        identical to the scalar path before this replaced it."""
         anchors = sorted(self.mr._role_targets.get(self.pair_role, set()))
+        if not anchors:
+            self._pack280_recall_states = np.zeros((0, self.mr.d), dtype=np.complex64)
+            self._pack280_recall_bounds = np.zeros((0, self.mr.d), dtype=np.complex64)
+            self._pack280_recall_anchors = []
+            return
+        states_raw = self.mr.recall_batch(anchors, self.state_role)
+        bounds_raw = self.mr.recall_batch(anchors, self.pair_role)
         states = []
         bounds = []
         keep = []
-        for a in anchors:
-            s = self.mr.recall(a, self.state_role)
-            if s is None:
-                continue
-            b = self.mr.recall(a, self.pair_role)
-            if b is None:
+        for a, s, b in zip(anchors, states_raw, bounds_raw):
+            if s is None or b is None:
                 continue
             sn = np.asarray(s, dtype=np.complex64)
             mag = float(np.abs(sn).mean()) + 1e-12
@@ -571,6 +601,43 @@ class Cat4Absorb:
                 (0, self.mr.d), dtype=np.complex64)
         self._pack280_recall_anchors = keep
 
+    def _recall_action_by_code(self, query_state, top_k):
+        """Day 101: rank anchors by chunked-code agreement (self.state_codes)
+        instead of cosine over the shared SDM's crosstalk-prone reconstruction,
+        then resolve the exact action via the anchor_actions cache (already
+        exact, int64-keyed, Day 96/282 -- never crosstalks). Returns [] if the
+        code store is unset/empty or nothing resolves, so the caller can fall
+        back to the pre-Day-101 path unconditionally.
+
+        state_codes (organism.factored) is a SHARED store -- it also holds
+        single-word distributional codes from Day 91's observe_meaning. A
+        nearest_by_hv scan has no reason to prefer an anchor over a word, so
+        an unfiltered result can hand back a plain word string. anchor_actions
+        (int64-keyed under the hood) raises ValueError on a non-anchor-shaped
+        string, so every candidate is filtered to the anchor prefix BEFORE
+        it's trusted -- caught in testing before it reached production."""
+        sc = self.state_codes
+        if sc is None or not getattr(sc, 'codes', None):
+            return []
+        # over-fetch: some candidates may be filtered out as non-anchor keys
+        ranked = sc.nearest_by_hv(query_state, top_k=max(top_k * 4, 20))
+        results = []
+        for anchor, agree in ranked:
+            if not (isinstance(anchor, str) and anchor.startswith('__state_')):
+                continue
+            entry = self.anchor_actions.get(anchor)
+            if not entry:
+                continue
+            chosen = entry[-1] if isinstance(entry, list) else entry
+            tok_tuple = chosen if isinstance(chosen, tuple) else tuple(str(chosen).split(' '))
+            if not tok_tuple:
+                continue
+            action_hv = self.focus_hv(list(tok_tuple)).astype(np.complex64)
+            results.append((anchor, action_hv, float(agree)))
+            if len(results) >= top_k:
+                break
+        return results
+
     def recall_action(self, state_tokens, top_k=5):
         """Pack 280 vectorized recall: single matmul over stacked
         (N, d) cached state matrix replaces per-anchor Python loop.
@@ -579,12 +646,45 @@ class Cat4Absorb:
 
         Speedup target vs Pack 262 v2: 28s -> 50ms per query (~560x).
         Falls back gracefully on empty cache.
+
+        Day 101: PREFERS chunked-code identification (self.state_codes) when
+        set -- MEASURED to hold 100%/99.95% (exact/paraphrase) identification
+        at N=137,450 where this method's own cosine-over-recall_batch ranking
+        collapses to noise (Kanerva load factor ~1,432, Day 100 finding). Falls
+        back to the original path unchanged when state_codes is unset or
+        resolves nothing, so callers built before Day 101 see no behavior
+        change.
         """
+        # Day 102: HOT-QUERY CACHE (the 'cache' of sdm+chunked-vsa+cache), LIVE in
+        # the organism's default recall path. A repeated state -- the common case
+        # at inference/replay -- returns in one dict lookup, skipping the code scan
+        # and the Pack-280 matmul entirely. Keyed on (state, top_k); CLEARS whenever
+        # the code store grows, so a newly taught anchor can never be shadowed by a
+        # stale cached recall (write-invalidation). Caches the EXACT computed result
+        # -> a hit is identical to recomputing (no accuracy change, no contract change).
+        from collections import OrderedDict
+        sc = self.state_codes
+        ver = len(sc.codes) if (sc is not None and getattr(sc, 'codes', None)) else 0
+        rc = getattr(self, '_recall_cache', None)
+        if rc is None or rc['ver'] != ver:
+            rc = {'ver': ver, 'd': OrderedDict(), 'cap': 20000}
+            self._recall_cache = rc
+        ckey = (tuple(state_tokens), int(top_k))
+        if ckey in rc['d']:
+            rc['d'].move_to_end(ckey)
+            return rc['d'][ckey]
+
+        query_state = self.focus_hv(state_tokens).astype(np.complex64)
+        by_code = self._recall_action_by_code(query_state, top_k)
+        if by_code:
+            rc['d'][ckey] = by_code
+            if len(rc['d']) > rc['cap']:
+                rc['d'].popitem(last=False)
+            return by_code
         if self._pack280_recall_states is None:
             self._pack280_build_recall_cache()
         if not self._pack280_recall_anchors:
             return []
-        query_state = self.focus_hv(state_tokens).astype(np.complex64)
         # Vectorized inner product: vdot(stored_i, query) for each row i.
         # = sum(conj(stored_i) * query) = (stored.conj() @ query) per row
         dots = self._pack280_recall_states.conj() @ query_state
@@ -609,6 +709,9 @@ class Cat4Absorb:
             results.append(
                 (self._pack280_recall_anchors[int(i)], action_n,
                  float(state_sims[int(i)])))
+        rc['d'][ckey] = results                          # cache the fallback result too
+        if len(rc['d']) > rc['cap']:
+            rc['d'].popitem(last=False)
         return results
 
     # ---- Pack 272 cached action codebook (speed-up) ------------------

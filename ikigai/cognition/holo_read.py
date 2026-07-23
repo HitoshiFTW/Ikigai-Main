@@ -345,6 +345,8 @@ class HolographicReader:
         for t in toks:
             if t in relset:
                 kinds.append(['rel', t, 1.0]); continue
+            if t in entity_set:              # an EXACT known entity beats a fuzzy morphology
+                kinds.append(['arg', t, 0.0]); continue   # relation-match ('italy' ~ cap'ital')
             sims = np.abs(M @ np.conj(self.morph.key(t))) / self.d
             i = int(np.argmax(sims)); best = float(sims[i])
             second = float(np.partition(sims, -2)[-2]) if len(sims) > 1 else 0.0

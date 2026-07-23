@@ -122,3 +122,89 @@ def empirical_boundary(absent_sims, k=DEFAULT_K):
     mu = sum(a) / n
     var = sum((s - mu) ** 2 for s in a) / max(n - 1, 1)
     return float(mu + float(k) * math.sqrt(var))
+
+
+# Day 102 -- DISTRIBUTION-FREE FINITE-SAMPLE abstention (conformal / selective
+# risk control), the calibrated complement to the geometry boundaries above.
+#
+# WHY, on top of the geometry/empirical boundaries: once recall goes through an
+# APPROXIMATE top-k index (Day-102 SPANN-style code index -> factored_meaning),
+# the retriever ALWAYS returns a nearest item, even for an out-of-store query,
+# and a k-sigma geometry threshold gives no finite-sample GUARANTEE on the
+# false-accept rate over that index.  Conformal prediction turns ANY score
+# (code agreement, cleanup cosine, unbinding residue) into a threshold tau with
+# a certified risk bound, assuming only exchangeability -- no distributional
+# model, no neural head, no gradient.
+#
+# (An external assessment framed this as 'SCRC-I'; that specific acronym is
+# unverified -- but conformal prediction, selective risk control, and the
+# Hoeffding upper confidence bound below are all standard, corroborated methods.)
+
+class ConformalAbstain:
+    """Inductive conformal abstention over a retriever confidence score.
+
+    THE GUARANTEE (the honest, achievable one -- a FALSE-ALARM bound):
+    calibrate(scores, correct) picks a single scalar threshold tau so that, for
+    an exchangeable OUT-OF-STORE / unanswerable query (one where answering would
+    be wrong), P(score >= tau) <= alpha.  I.e. the rate at which the organism
+    ANSWERS something it should have abstained on is bounded by alpha, with EXACT
+    finite-sample validity under exchangeability alone -- no distribution model,
+    no neural head, no gradient.  accept(score) answers iff score >= tau, else
+    abstains.  (This bounds the false-ANSWER rate on unknowns -- P(accept|wrong);
+    it does NOT by itself bound P(wrong|accept), which is base-rate dependent.
+    False-alarm control is exactly what 'correct-or-abstain over a top-k index'
+    needs: an ANN index always returns a nearest item, and this caps how often a
+    spurious one is trusted.)
+
+    METHOD: one-sided conformal quantile of the should-abstain (wrong) scores --
+    tau = the ceil((n+1)(1-alpha))-th smallest of the n wrong-example scores.
+    Standard split-conformal; exact, no CI, no multiplicity search (an earlier
+    Hoeffding-selective-risk scan abstained on everything -- wrong tool).
+
+    (An external assessment framed this as 'SCRC-I'; that acronym is unverified,
+    but split-conformal prediction and one-sided conformal p-values are standard,
+    corroborated methods.)"""
+
+    def __init__(self, alpha=0.05, delta=0.05):
+        self.alpha = float(alpha)
+        self.delta = float(delta)          # kept for API/compat; conformal is exact, unused
+        self.tau = float('inf')            # uncalibrated -> abstain on everything (safe)
+        self.answer_rate = 0.0
+        self.n_calib = 0
+
+    def calibrate(self, scores, correct):
+        """scores: retriever confidence per calibration query (higher = more
+        confident).  correct: truthy iff ANSWERING that query would be right (an
+        absent/out-of-store query is always False -- answering it is a false
+        alarm).  Calibrates tau on the wrong (should-abstain) scores.  Returns tau."""
+        scores = [float(s) for s in scores]
+        neg = sorted(s for s, c in zip(scores, correct) if not c)   # wrong-example scores, ascending
+        self.n_calib = len(neg)
+        n = len(neg)
+        if n == 0:
+            self.tau = float('-inf')       # nothing should be rejected -> answer all
+        else:
+            rank = math.ceil((n + 1) * (1.0 - self.alpha))   # one-sided conformal quantile
+            self.tau = neg[rank - 1] if rank <= n else float('inf')  # alpha < 1/(n+1) -> abstain all
+        self.answer_rate = (sum(1 for s in scores if s > self.tau) / len(scores)
+                            if scores else 0.0)
+        return self.tau
+
+    def accept(self, score):
+        """Answer iff confident enough; else abstain.  STRICT '>' -- the scores
+        are discretized (code agreement is k/bits), so ties pile up at tau; strict
+        acceptance excludes that tie mass and keeps the false-alarm bound
+        conservative (FAR <= alpha) instead of letting ties over-accept it."""
+        return float(score) > self.tau
+
+    def state_dict(self):
+        return {'alpha': self.alpha, 'delta': self.delta, 'tau': self.tau,
+                'answer_rate': self.answer_rate, 'n_calib': self.n_calib}
+
+    def load_state(self, st):
+        self.alpha = float(st.get('alpha', self.alpha))
+        self.delta = float(st.get('delta', self.delta))
+        self.tau = float(st.get('tau', float('inf')))
+        self.answer_rate = float(st.get('answer_rate', 0.0))
+        self.n_calib = int(st.get('n_calib', 0))
+        return self.tau

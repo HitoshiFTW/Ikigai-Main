@@ -14,6 +14,23 @@
 # -- Prince Siddhpara, February 23, 2026
 # Hitoshi AI Labs -- NeuroSeed
 
+# ===========================================================================
+# STATUS (Day 95 red-team correction -- read before citing this file)
+# ---------------------------------------------------------------------------
+# This file is a STANDALONE biological/cognitive life-simulation. It is the
+# origin of the project, but it is NOT the production organism and is imported
+# by NOTHING: `grep -r "import ikigai\b"` across the repo returns zero hits.
+# Every benchmark, capability, and the persisted organism.ikg run through
+#   integrate.py  +  the ikigai/cognition/  PACKAGE
+# which is a DIFFERENT thing that merely shares the name. This root file runs
+# only if executed directly (`python ikigai.py`) and its ~200 "Day 23/24+"
+# observer classes are self-documented "Pure observer: zero writes to any
+# behavioral/survival path" -- they compute confidence floats and write nowhere.
+# DO NOT present ikigai.py as "the living organism" in the pitch: the wired,
+# load-bearing organism layer lives in integrate.py (org.live / dream_discover /
+# belief / curiosity). See Research_Log/Day_095_RedTeam_Report.md (F-ORPHAN).
+# ===========================================================================
+
 import math, random, time, os, sys, csv, statistics
 from collections import deque
 

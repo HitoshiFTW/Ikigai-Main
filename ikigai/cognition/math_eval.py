@@ -240,6 +240,24 @@ class MathEval:
                 'substrate_native': substrate_native,
                 'decode_score': float(score)}
 
+        # Day-102 NO-HALLUCINATION FIX (Prince: "substrate had its own arithmetic
+        # solver"). The exact substrate solver is the RHC/CRT ring ABOVE. What
+        # follows is the FPE word-magnitude fallback -- and it is NOT a substrate
+        # operation: _word_magnitude (step 2) maps ANY token to the nearest digit's
+        # magnitude via cooccur cosine with NO floor, so it fabricated confident
+        # numbers on ordinary text AND got even genuine word-numbers wrong
+        # (two+three -> 12). MEASURED reaching BOTH doors: gr.reason('how do i get
+        # from paris to berlin') -> 10 method=substrate_arith, org(x) solve -> 10 at
+        # F=-0.0. It only ran when the RHC ring could NOT (fewer than 2 digit
+        # operands) -- i.e. exactly when the substrate cannot compute this, where
+        # correct-or-abstain says return None. Reachable now ONLY under an explicit
+        # engine='fpe' opt-in (the caller owns the risk); the organism runs
+        # engine='auto' and never touches it.
+        if self.engine != 'fpe':
+            return None, op_kind, {
+                'engine': 'none',
+                'err': 'no exact substrate (RHC) arithmetic for this input; '
+                       'FPE word-magnitude path is not substrate-native (fabrication risk)'}
         # Pack 252 FPE fallback (word-form needs cat-3 cooccur grounding)
         left_hv = left_int = right_hv = right_int = None
         for j in range(op_i - 1, -1, -1):

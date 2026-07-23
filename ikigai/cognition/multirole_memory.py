@@ -861,6 +861,40 @@ class MultiRoleMemory:
         return self._bank(role).read(self._addr(word, role),
                                      word=self._slot(word, role))
 
+    def recall_batch(self, words, role):
+        """Day-100 -- N separate recall() calls (each its own address build + its own top-k
+        similarity search) collapsed into ONE batched address build + ONE batched top-k search
+        (VSASDM.locs_batch, Pack 116 -- already existed, just never wired to a many-anchor caller).
+
+        MEASURED: cat4's _pack280_build_recall_cache walked 63,917 anchors this way and cost
+        161.7s -- not because the underlying math is slow (a single (M=6144,d=400) similarity
+        search is a few microseconds), but because 127,834 separate Python-level recall() calls
+        each pay their own function-call chain (recall -> _addr -> _bind -> ck.key -> locs ->
+        _activate) instead of sharing one BLAS call across all of them, exactly the overhead
+        Pack 116 built key_batch/locs_batch to eliminate -- for a single-word caller, never a
+        many-anchor one.
+
+        Same formula as recall(), computed for every word at once:
+            addr = key(word) * rolev                    (rolev is per-role, shared -- broadcasts)
+            read = renorm(sum(C[top-k nearest hard locations to addr]))
+
+        Falls back to the scalar loop when frame conditioning is active (current_frame_hv is not
+        None) -- the batched formula assumes an entity-independent rolev, which is exactly what
+        None means. cat4's recall path never sets frame conditioning, so this is the common case,
+        not a corner one."""
+        words = list(words)
+        if self.current_frame_hv is not None or not words:
+            return [self.recall(w, role) for w in words]
+        rolev = self.roles[role]
+        keys = self.ck.key_batch(words)
+        K = np.stack([keys[w] for w in words]).astype(np.complex64)      # (N, d)
+        addrs = (K * rolev[np.newaxis, :]).astype(np.complex64)          # _bind, broadcast
+        slots = [self._slot(w, role) for w in words]
+        bank = self._bank(role)
+        idx_list = bank.locs_batch(addrs, slots)
+        from ikigai.cognition.flat_memory import _renorm
+        return [_renorm(bank.C[idx].sum(axis=0)) for idx in idx_list]
+
     # Pack 247z-CM (Day 72): per-role read-time common-mode HV.
     # v_common[role] = mean(recall(w, role) for w in sample). Subtracting
     # at read time kills the FHRR crosstalk floor so the structured

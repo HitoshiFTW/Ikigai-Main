@@ -24,6 +24,8 @@ builds on.  It is NOT novel generation: inventing an unseen sequence (branching 
 decision point) is a separate, open axis.  A body-part: the organism's holographic
 sequence memory.
 """
+import re
+
 import numpy as np
 
 from ikigai.cognition.flat_memory import ComputedKey
@@ -117,6 +119,39 @@ class HolographicSequenceMemory:
         return sum(1 for a, b in zip(got, toks) if a == b) / max(1, n)
 
 
+def _trim_to_span(frame):
+    """Day-99 -- keep only the tokens BETWEEN the arguments (slots inclusive).
+
+    The docstring below has always promised anti-unification -- "the tokens CONSTANT across
+    examples are the relation's surface frame" -- but learn() took the WHOLE SENTENCE as the frame
+    and majority-voted over full sentences. On the toy corpus every sentence was "a X is a Y", so
+    the whole sentence WAS the frame and nobody noticed. On REAL text it collapses: 46 aligned
+    Tatoeba sentences gave 46 distinct full-sentence frames, and the "majority" was simply the most
+    common entire sentence --
+        capital -> ['{O}','is','the','capital','of','{S}','and','its','most','important','city.']
+    which realises as "paris is the capital of france and its most important city." for EVERY
+    country. The relation's surface is not the sentence it appeared in.
+
+    Everything AFTER the last argument is that particular sentence's own material, not the
+    relation's -- so the tail is dropped and the majority vote then runs over frames where
+    agreement is real.
+
+    Only the TAIL. Trimming to the slot span (dropping the LEADING tokens too) looks symmetrical
+    and breaks extraction: the leading article in ['a','{S}','is','a','{O}'] is not decoration, it
+    is the LEFT ANCHOR that bounds the {S} slot. Without it {S} captures greedily from the start
+    and swallows it -- measured, extract_verified('a kobaru is a feline') returned subject
+    'a kobaru', so read() learned nothing and org('kobaru') went back to "i don't know". A leading
+    function word is part of the frame; a trailing clause is not.
+        'Paris is the capital of France and its most important city.'
+          -> ['{O}','is','the','capital','of','{S}']          # tail dropped
+        'a vikode is a feline'  ->  ['a','{S}','is','a','{O}']  # unchanged, anchor kept
+    """
+    idx = [i for i, t in enumerate(frame) if t in ('{S}', '{O}')]
+    if not idx:
+        return tuple(frame)
+    return tuple(frame[:max(idx) + 1])
+
+
 class SurfaceRealizer:
     """Day-87 -- the thin, content-BLIND surface smoother (File 5's only sanctioned
     learned component).  It turns a grounded fact `(s, r, o)` from the substrate's own
@@ -133,11 +168,13 @@ class SurfaceRealizer:
     substrate did not derive.  No backprop: pure alignment + majority vote."""
 
     def __init__(self):
-        self.templates = {}      # relation -> frame list with '{S}'/'{O}' slots
+        self.templates = {}      # relation -> majority frame (compat)
+        self.variants = {}       # relation -> [frame, ...] distinct learned realizations (fluency)
 
     def learn(self, pairs):
-        """pairs: list of ((s, r, o), sentence).  Induce a frame per relation by
-        aligning the sentence tokens to the fact and keeping the constant remainder."""
+        """pairs: list of ((s, r, o), sentence).  Induce frames per relation by aligning the
+        sentence tokens to the fact and keeping the constant remainder.  Keeps the majority frame
+        AND every distinct variant (multiple natural surface forms -> realization VARIETY)."""
         from collections import Counter, defaultdict
         frames = defaultdict(list)
         for (s, r, o), sent in pairs:
@@ -146,24 +183,132 @@ class SurfaceRealizer:
             frame = tuple('{S}' if t == s else ('{O}' if t == o else t) for t in toks)
             # only accept a frame that actually contains both slots (a real alignment)
             if '{S}' in frame and '{O}' in frame:
-                frames[r].append(frame)
+                frames[r].append(_trim_to_span(frame))
         for r, fs in frames.items():
-            self.templates[r] = list(Counter(fs).most_common(1)[0][0])   # majority frame
+            ranked = Counter(fs).most_common()
+            self.templates[r] = list(ranked[0][0])                       # majority (compat)
+            # keep distinct variants, majority-first (learned surface forms, not authored)
+            self.variants[r] = [list(f) for f, _ in ranked]
         return len(self.templates)
 
-    def realize(self, s, r, o):
-        """Render a fact as fluent text using the induced frame; fall back to the
-        substrate's own surface ('s r o') when the relation has no learned frame."""
+    def _apply(self, frame, s, o):
+        return ' '.join(s if t == '{S}' else (o if t == '{O}' else t) for t in frame)
+
+    def realize(self, s, r, o, variant=None):
+        """Render a fact as fluent text using an induced frame; fall back to the substrate's own
+        surface ('s r o') when the relation has no learned frame.  variant=i selects the i-th learned
+        surface form (mod #variants) for realization VARIETY; None uses the majority frame."""
         s, r, o = str(s).lower(), str(r).lower(), str(o).lower()
+        if variant is not None:
+            vs = self.variants.get(r)
+            if vs:
+                return self._apply(vs[int(variant) % len(vs)], s, o)
         frame = self.templates.get(r)
         if not frame:
             return f"{s} {r} {o}"
-        return ' '.join(s if t == '{S}' else (o if t == '{O}' else t) for t in frame)
+        return self._apply(frame, s, o)
+
+    def n_variants(self, r):
+        return len(self.variants.get(str(r).lower(), []) or [self.templates.get(str(r).lower())])
 
     @staticmethod
     def content_tokens(s, r, o):
         """The tokens that MUST be grounded (the frame is content-blind)."""
         return {str(s).lower(), str(o).lower()}
+
+    def _frame_regex(self, frame, lenient=False):
+        """Compile an induced frame into an ANCHOR pattern: function tokens are literal
+        anchors (in order), {S}/{O} are variable-length spans (so real multi-token
+        entities like 'south korea' are captured).  lenient=True lets extra tokens sit at
+        the ends (noise tolerance) -- the leniency the verify step then filters."""
+        parts = []
+        slots = [t for t in frame if t in ('{S}', '{O}')]
+        last_slot = slots[-1] if slots else None
+        seen_last = False
+        # walk from the right to mark the final slot as greedy (absorb the tail)
+        rev_last_idx = max(i for i, t in enumerate(frame) if t in ('{S}', '{O}')) if slots else -1
+        for i, t in enumerate(frame):
+            if t == '{S}' or t == '{O}':
+                grp = 'S' if t == '{S}' else 'O'
+                greedy = '' if i == rev_last_idx else '?'      # last slot greedy, rest minimal
+                parts.append(rf'(?P<{grp}>.+{greedy})')
+            else:
+                parts.append(re.escape(t))
+        core = r'\s+'.join(parts)
+        pat = (r'^.*?\s*' + core + r'\s*.*?$') if lenient else (r'^\s*' + core + r'\s*$')
+        return re.compile(pat)
+
+    def extract(self, sentence, lenient=False):
+        """INVERSE of realize -- extraction = inverse generation.  Align a sentence to
+        each INDUCED frame by ANCHOR matching: the function tokens are ordered anchors,
+        the {S}/{O} spans are the content (multi-token entities allowed).  Returns every
+        (s, r, o) whose frame anchors are present.  The same induced frame that GENERATES
+        'a wug is a florp' from (wug,isa,florp) READS it back -- text -> grounded triple,
+        no authored per-relation rule, no backprop.  lenient=True tolerates leading/
+        trailing noise (the propose half of search-under-verification; verify() filters).
+        Disambiguation upstream: more anchor tokens = more specific = ranked first."""
+        sent = ' '.join(str(sentence).lower().split())
+        out = []
+        # try the primary template AND every induced variant per relation -- a relation
+        # has more than one surface order ('the R of S is O' AND 'O is the R of S'), so
+        # extraction must read them all, not just the primary.
+        frames = list(self.templates.items())
+        for r, vs in (getattr(self, 'variants', {}) or {}).items():
+            for frame in vs:
+                frames.append((r, frame))
+        seen = set()
+        for r, frame in frames:
+            key = (r, tuple(frame))
+            if key in seen:
+                continue
+            seen.add(key)
+            m = self._frame_regex(frame, lenient=lenient).match(sent)
+            if not m:
+                continue
+            s = (m.groupdict().get('S') or '').strip()
+            o = (m.groupdict().get('O') or '').strip()
+            if s and o:
+                anchors = sum(1 for ft in frame if ft not in ('{S}', '{O}'))
+                out.append((s, r, o, anchors))
+        out.sort(key=lambda x: -x[3])
+        return [(s, r, o) for (s, r, o, _) in out]
+
+    @staticmethod
+    def _token_f1(a, b):
+        """token-level F1 between two sentences -- the cheap regeneration-match score."""
+        ta, tb = a.lower().split(), b.lower().split()
+        if not ta or not tb:
+            return 0.0
+        from collections import Counter
+        ca, cb = Counter(ta), Counter(tb)
+        overlap = sum((ca & cb).values())
+        if overlap == 0:
+            return 0.0
+        prec, rec = overlap / len(ta), overlap / len(tb)
+        return 2 * prec * rec / (prec + rec)
+
+    def verify(self, source, s, r, o):
+        """VERIFY a candidate triple by REGENERATION: realize (s,r,o) with the induced
+        frame and score how well it reconstructs the source sentence.  Generation is the
+        verifier for extraction -- the search-under-verification move."""
+        regen = self.realize(s, r, o)
+        return self._token_f1(regen, ' '.join(str(source).lower().split()))
+
+    def extract_verified(self, sentence, thresh=0.8, return_score=False):
+        """SEARCH-UNDER-VERIFICATION extraction (#8 on real work): lenient PROPOSE (all
+        anchor alignments, noise-tolerant) -> VERIFY each by regeneration -> SELECT the
+        best that reconstructs the source above `thresh`; ABSTAIN (None) otherwise.  This
+        lets extraction be lenient enough for messy real text WITHOUT fabricating: a
+        mis-aligned parse regenerates a different sentence and is rejected."""
+        cands = self.extract(sentence, lenient=True)
+        best, best_s = None, 0.0
+        for (s, r, o) in cands:
+            sc = self.verify(sentence, s, r, o)
+            if sc > best_s:
+                best, best_s = (s, r, o), sc
+        if best is not None and best_s >= thresh:
+            return (best, best_s) if return_score else best
+        return (None, best_s) if return_score else None
 
 
 class HolographicBranchGenerator:

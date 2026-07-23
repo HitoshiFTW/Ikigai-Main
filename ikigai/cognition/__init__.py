@@ -1,9 +1,10 @@
 """ikigai.cognition — high-level reasoning capabilities atop the organism."""
 
 from ikigai.cognition.routers import ToolRouter
-from ikigai.cognition.memory import TransitionMemory
+# memory.TransitionMemory + wake_sleep.WakeSleepCompressor REMOVED (Day-103, audit
+# Tier-B): dead pair -- TransitionMemory was used only by WakeSleepCompressor, which
+# had zero callers beyond this re-export; sleep consolidation lives in sleep_replay.
 from ikigai.cognition.moe import MoERouter, Codebook
-from ikigai.cognition.wake_sleep import WakeSleepCompressor
 from ikigai.cognition.reasoning import (
     RelationAlgebra,
     SemanticRoleMemory,
@@ -61,8 +62,10 @@ from ikigai.cognition.metacognitive_mirror import MetacognitiveHVMirror
 from ikigai.cognition.self_modifying_refiner import SelfModifyingRefiner, SelfModifyingSchema
 # benchmark_runner REMOVED (audit batch 1, Day-83): dead, imported generation_pipeline;
 # zero live importers (benchmark_harness_v2 is the live harness, untouched).
-from ikigai.cognition.substrate_adapter import SubstrateAdapter
-from ikigai.cognition.no_forgetting_proof import NoForgettingProof
+# substrate_adapter + no_forgetting_proof REMOVED (Day-102): both orbited the
+# deleted GenerationPipeline -- SubstrateAdapter serialized it, NoForgettingProof
+# monitored it. Zero live callers (imported only here, in this re-export); the
+# living generation path is generation_engine. Verified orphan via grep.
 # hot_loader REMOVED (audit batch 2, Day-83): exec-wrapper over code_gen's deleted
 # answer-bank templates; was instantiated but never used (self.hotload dead).
 from ikigai.cognition.holographic_memory import HolographicMemory, _encode_semantic
@@ -97,13 +100,10 @@ from ikigai.cognition.benchmark_harness_v2 import (
 from ikigai.cognition.cgpsp_encoder import CGPSPEncoder
 from ikigai.cognition.pi_k_algebra import PiK
 from ikigai.cognition.pgmw import PersonaGrid
-from ikigai.cognition.sac_field import SACField, BasinField
 
 __all__ = [
     'ToolRouter',
-    'TransitionMemory',
     'MoERouter', 'Codebook',
-    'WakeSleepCompressor',
     'RelationAlgebra', 'SemanticRoleMemory', 'EventSequenceMemory',
     'detect_pattern', 'compose', 'synthesize_composition', 'generate_composition_code',
     'PhaseLockedHolographicBuffer',
@@ -127,8 +127,6 @@ __all__ = [
     'SchemaRefiner',
     'MetacognitiveHVMirror',
     'SelfModifyingRefiner', 'SelfModifyingSchema',
-    'SubstrateAdapter',
-    'NoForgettingProof',
     'HolographicMemory',
     'VSACalculus',
     'BeliefField',
@@ -154,5 +152,4 @@ __all__ = [
     'CGPSPEncoder',
     'PiK',
     'PersonaGrid',
-    'SACField', 'BasinField',
 ]

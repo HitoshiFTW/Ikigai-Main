@@ -21,9 +21,8 @@ Public interface:
     trace  = org.trace()
 """
 
-import os, sys
-# Portable: make this file's own directory importable regardless of machine/cwd,
-# so sibling modules (ikigai_bridge, the ikigai/ package) resolve on any PC.
+import os
+import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np
@@ -32,7 +31,6 @@ import numpy as np
 from ikigai.cognition.cgpsp_encoder       import CGPSPEncoder
 from ikigai.cognition.pi_k_algebra        import PiK
 from ikigai.cognition.pgmw                import PersonaGrid
-from ikigai.cognition.sac_field           import SACField
 
 # ── Reasoning core (hardcoded path -- works on simple SVO) ───────────────────
 # reasoning_engine REMOVED (audit trio, Day-83): legacy python-dict WorkingMemory
@@ -120,7 +118,6 @@ class IkigaiOrganism:
         self.encoder = CGPSPEncoder(d=d, gamma=0.4)
         self.pik     = PiK(d=d, n_primes=32)
         self.persona = PersonaGrid(d=d)
-        self.sac     = SACField(d=d)
 
         # BEING + grounding channels (Pack 96-101). being.lexicon shares the
         # substrate's ComputedKey identity (Day-83 migrate).
@@ -253,6 +250,725 @@ class IkigaiOrganism:
 
     # ── Primary interface ────────────────────────────────────────────────
 
+    # ─────────────────────────────────────────────────────────────────────────────────────────
+    # Day-99 -- THE ONE API.  You call the organism. The organism decides.
+    # ─────────────────────────────────────────────────────────────────────────────────────────
+
+    _FACULTIES = ()          # populated below by _register_faculty; ORDER MUST NOT MATTER.
+
+    @classmethod
+    def _register_faculty(cls, name, fn):
+        cls._FACULTIES = tuple(cls._FACULTIES) + ((name, fn),)
+        return fn
+
+    @staticmethod
+    def _surprise(conf):
+        """F = -log(confidence).  0 at certainty, grows without bound as confidence -> 0."""
+        import math
+        return -math.log(max(1e-9, min(1.0, float(conf))))
+
+    def sense(self, x):
+        """Day-99 -- EVERY faculty ATTEMPTS the input and reports MEASURED confidence.
+
+        This is the anti-cheat. The tempting design is to classify the input first --
+        `if looks_like_a_question: answer() elif looks_like_a_fact: learn()` -- but that is the
+        if/elif ladder again, just moved upstream, and an author decided it. The Day-95 red team
+        named this exact move (DS-DISPATCH), and Day-99 measured its cost: identical proposals
+        returned different answers purely by append order.
+
+        So nothing here inspects the SHAPE of the input. Each faculty simply TRIES, and reports how
+        well it actually did, from its own measurement:
+          learn   -- extraction score x prediction error (nothing to learn if already believed)
+          answer  -- the derive path's own grounding
+          speak   -- how much the organism can actually say about what it recognises
+          abstain -- always available at the calibrated floor, so "I don't know" can WIN
+        The organism then picks argmin F. Change what it KNOWS and it does something different;
+        change the ORDER faculties were registered and nothing changes at all.
+
+        Returns the proposal list [(faculty, payload, F)] -- the organism's felt options."""
+        props = []
+        for name, fn in self._FACULTIES:
+            try:
+                p = fn(self, x)          # RAW input: a faculty decides what it can make of it
+            except Exception:
+                p = None
+            if p is not None:
+                conf, payload = p
+                if conf is not None and conf > 0.0:
+                    props.append((name, payload, self._surprise(conf)))
+        return props
+
+    # Day 101 -- ConceptGraph was found dormant (read_organism, its only writer,
+    # has zero call sites anywhere in the repo) AND, on inspection, its own write
+    # calls build the WRONG event schema (constructs {'tokens','valence',...} but
+    # ConceptGraph.ingest_event needs {'latent_end','dominant_action',...} --
+    # would KeyError every time, silently swallowed by a blanket try/except).
+    # This is a real, separate, WORKING pipeline wired into the actual org(x)
+    # entry point (be()), not the dead read_organism: real per-call signals
+    # (chosen faculty = action, measured F = energy/cortisol proxy, a token-key
+    # projection = latent) instead of the broken ad-hoc dict. No authored
+    # lexicon (neuromod.expose_tokens's SPIKE_LEXICON was deliberately avoided --
+    # it's a hand-curated word list, exactly what the standing no-hardcoding
+    # rule bans on a production path).
+    def _concept_latent(self, tokens):
+        """64-dim real projection of a token's computed key -- the SAME
+        substrate identity every other module derives from (ComputedKey),
+        just truncated to the dims ConceptGraph/EventCompressor expect.
+        No new authored vocabulary, no lexicon."""
+        if not tokens:
+            return [0.0] * 64
+        hv = self.unified.ck.key(str(tokens[-1]))
+        return [float(v) for v in hv.real[:64]]
+
+    def _update_concept_memory(self, tokens, chose, F):
+        """Feed one real (state, action, outcome) transition into
+        EventCompressor -> ConceptGraph, then check the LATTER for a
+        newly-completed compressed event to forward. This is the actual
+        chain the docstrings always described but the dead read_organism
+        never correctly performed. Bounded (event_comp maxlen=500,
+        concept_graph max_nodes=256) -- consolidate-and-forget, not
+        unbounded growth. Best-effort: never raises into be().
+
+        EventCompressor's segmentation law compares latent_post of transition
+        N against latent_pre of transition N+1 -- it expects a CONTINUOUS
+        trajectory (same evolving state), which is only meaningful if both
+        derive from the SAME underlying signal (the topic/content being
+        processed). Using latent_pre=key(query) and latent_post=key(chosen
+        faculty) -- two unrelated vectors -- was tried first and measured to
+        never pass the 0.9 similarity bar even for the identical repeated
+        query, so nothing ever accumulated (caught by day101_concept_memory_
+        live.py before this reached anyone). Fix: both derive from the
+        query's own content; the transition's action/energy/cortisol carry
+        what happened, not the latent."""
+        try:
+            self._self_tick += 1
+            latent = self._concept_latent(tokens)
+            ep = {
+                'tick': self._self_tick,
+                'latent_pre': latent,
+                'latent_post': latent,
+                'action': str(chose),
+                'reason_stage': 'default',   # no staged-reasoning signal exists yet;
+                                              # disclosed simplification, not fabricated
+                'energy_delta': -float(F),
+                'cortisol_delta': float(F),
+            }
+            n_before = len(self.event_comp)
+            self.event_comp.ingest_transition(ep)
+            if len(self.event_comp) > n_before:
+                self.concept_graph.ingest_event(self.event_comp.last())
+        except Exception:
+            pass
+
+    def _fac_learn(self, text):
+        """Confidence that learning is the right thing: how cleanly can this be extracted as a
+        fact, and how WRONG is the organism about it right now? A fact it already believes has
+        prediction error 0 -> nothing to learn -> no proposal (not a hardcoded rule; the RPE is
+        computed from its own belief)."""
+        # A (subject, relation, object) tuple IS a fact -- reading it is typing, not shape-guessing,
+        # so extraction is certain and only the prediction error decides whether learning wins.
+        # Raw TEXT must go through the LEARNED extractor: this organism does not hardcode grammar,
+        # so an untrained one genuinely cannot extract, and honestly proposes nothing.
+        if isinstance(text, (tuple, list)) and len(text) == 3 and all(text):
+            tri, score = tuple(str(v).strip().lower() for v in text), 1.0
+        else:
+            # a QUESTION is not a telling -- never learn from it (correct-or-abstain).  The
+            # learned extractor has no such guard, so gate the whole faculty here.
+            if isinstance(text, str) and self._is_question(text):
+                return None
+            try:
+                tri, score = self.extract_verified(str(text), return_score=True)
+            except Exception:
+                tri, score = None, 0.0
+            if (not tri or len(tri) < 3 or not all(tri[:3])) and isinstance(text, str):
+                # a paragraph: the whole blob may not match a single frame -- the FIRST sentence
+                # that DOES (via the LEARNED frames) is enough to win 'learn'; be() -> tell() then
+                # absorbs every sentence. Splitting on sentence punctuation, not on any word list.
+                import re as _re
+                for _s in _re.split(r'[.!?\n]+', text):
+                    _s = _s.strip()
+                    if not _s or self._is_question(_s):
+                        continue
+                    try:
+                        ev = self.extract_verified(_s, return_score=True)
+                    except Exception:
+                        ev = (None, 0.0)
+                    if ev and ev[0] and len(ev[0]) >= 3 and all(ev[0][:3]):
+                        tri, score = ev[0], ev[1]
+                        break
+        if not tri or len(tri) < 3 or not all(tri[:3]):
+            return None
+        err = self.prediction_error(tri[0], tri[1], tri[2])
+        conf = float(score) * float(err)
+        return (conf, tuple(tri[:3])) if conf > 0.0 else None
+
+    def _fac_answer(self, text):
+        """Confidence that answering is right: the derive path either grounds an answer or it does
+        not. Grounding is the organism's own no-hallucination gate (Day-98 must-do #5).
+
+        Day-103 -- DERIVE + FLUENT, TALK TILL DONE first: a question can ask several things
+        ('the capital of france AND its continent'); answer_fluent extracts every asked
+        relation, derives each fact, and speaks a fluent clause per fact until all are
+        covered, then halts (grounded, query-scoped, honest). Only when it produces
+        nothing (not a factual multi-relation ask) does the single-relation derive path
+        below run -- so org(x) answers completely and fluently through its own front door."""
+        if not isinstance(text, str):
+            return None
+        try:
+            fluent = self.answer_fluent(text)
+        except Exception:
+            fluent = None
+        if fluent:
+            return (1.0, fluent)                      # derived, complete, fluent -> certain
+        try:
+            a = self.answer(text)
+        except Exception:
+            return None
+        if not isinstance(a, dict):
+            return None
+        fact = a.get('fact')
+        txt = (a.get('text') or '').strip()
+        if not fact or not txt or txt.lower().startswith("i don't know"):
+            return None
+        return (1.0 if a.get('grounded') else 0.5, txt)
+
+    def _targeted_ungrounded(self, toks, topic):
+        """Day-100 -- does this input structurally name a relation of `topic` that the organism
+        does NOT hold? Shared by _fac_speak and _fac_wonder, both of which had the same disease:
+        given a word never modeled as a relation before ('mayor', 'inventor'), each fell back to
+        substituting something ELSE about the topic instead of admitting nothing matched.
+
+        _REL_TEMPLATES generates relation-questions as '{r} of {e}' / 'what is the {r} of {e}' --
+        so a content word immediately before 'of {topic}' is being used AS a relation name by the
+        question's OWN structure, independent of whether that word was ever taught as one. Probed
+        via eng.atoms(), the same generic-template path any real relation round-trips through --
+        no authored word list. Function words are the organism's own induced-frame literals (the
+        same derivation extract_corpus uses), never an authored stoplist.
+
+        Returns True only when the pattern is structurally present AND ungrounded -- absent
+        pattern means "don't know", not "grounded", so callers must treat False as uninformative,
+        not as permission."""
+        try:
+            ti = toks.index(topic)
+        except ValueError:
+            return False
+        if ti < 2 or toks[ti - 1] != 'of':
+            return False
+        cand_rel = toks[ti - 2]
+        stop = set()
+        for _f in (getattr(self.surface, 'templates', None) or {}).values():
+            for _t in _f:
+                if not (str(_t).startswith('{') and str(_t).endswith('}')):
+                    stop.add(str(_t).strip().lower())
+        if not cand_rel or cand_rel == topic or cand_rel in stop:
+            return False
+        try:
+            return not self.general_reasoner.derive_engine.atoms(cand_rel, topic)
+        except Exception:
+            return False
+
+    def _fac_wonder(self, text):
+        """Confidence that ASKING is the right act -- the organism's own curiosity, competing.
+
+        The hard part was not detecting the gap (`wonder` already returns
+        {'relation','question','novelty'} from a real gap analysis) but PRICING it. Novelty is 1.0
+        for a total gap, so a naive wonder proposes at F=0 and TIES with a confident answer:
+        `org('what is the capital of france')` would then deadlock into 'conflict' on a question it
+        can answer perfectly. Every obvious fix was a cheat: discount curiosity by a constant
+        (authored), fire only when the input "isn't a question" (shape classification -- the ladder
+        moved upstream), or slot it just above abstain (the same authored blend renamed).
+
+        The framing was wrong. The question is not "how much is curiosity worth against answering?"
+        -- it is "is this gap even ABOUT what was asked?", and that is evidence, not preference:
+          * the input NAMES a relation it already knows for that entity -> nothing to wonder about
+            HERE. Silent. (france's gap is `country`; the input asked `capital`, which it knows.)
+          * the input names a relation that IS a gap -> that is exactly the thing to ask.
+          * the input names a bare entity -> its most novel gap is fair game.
+        Relations are read with the engine's OWN relation vocabulary, the same source the answer
+        faculty parses against. No authored list, no shape test.
+
+        Confidence = novelty x the FRACTION of that entity's relations still unknown -- both
+        measured. An entity it knows almost nothing about is worth asking about; one it has already
+        mapped is not."""
+        if not isinstance(text, str):
+            return None
+        eng = self.general_reasoner.derive_engine
+        rels = set(eng.relations or ())
+        if not rels:
+            return None
+        try:
+            toks = [t for t in self.general_reasoner.tokenize(text) if t]
+        except Exception:
+            return None
+        asked = [t for t in toks if t in rels]
+        best = None
+        ents = getattr(eng, 'entities', None) or set()
+        for t in toks:
+            if t in rels or t not in ents:
+                # O(1) membership gate. wonder() runs a full gap analysis, so calling it on every
+                # token ran it on 'the'/'of'/'a' too and cost 10x: MEASURED capitals 10.6 ms/query
+                # -> 111.8 ms/query when this faculty was added. Near-zero compute is a headline of
+                # this project; a curiosity faculty must not tax every query the organism answers.
+                # Safe against the Day-96 chicken-and-egg (`entities` fills from atom() hits): a
+                # token the engine has never resolved has no gap analysis worth running anyway, and
+                # the answer/solve faculties do not depend on this gate.
+                continue
+            # Day-100 -- the same disease _fac_speak had: 'the inventor of germany is' names no
+            # relation IN `rels` (never taught), so `asked` comes back empty and the filter below
+            # (`if asked and r not in asked`) never fires -- wonder substitutes its OWN favorite gap
+            # ('what is the country of germany?') for a targeted-but-ungrounded question instead of
+            # admitting nothing matches. Same structural probe as _fac_speak, shared helper.
+            if self._targeted_ungrounded(toks, t):
+                continue
+            # wonder() re-runs a full gap analysis per call, so the same entity was re-analysed on
+            # every query even when nothing had changed: 10.6 -> 111.8 ms/query when this faculty
+            # landed, 59.3 after the entity gate, and the residue was all repeated analysis. Cache
+            # per entity, invalidated by the SAME signal the rest of the organism already uses --
+            # a learn sets _anc_dirty (ingest_triples/ingest_addressed), so a cache stamped with it
+            # cannot serve stale curiosity about knowledge that has since arrived.
+            # Stamped with the LEARN epoch, not len(triples). Reading is not learning: atom() calls
+            # _record, so the mining index grows on every successful READ, and a len(triples) stamp
+            # therefore invalidated the cache on queries that taught the organism nothing --
+            # measured, curiosity still cost 3.37x WARM because it re-analysed the same entity on
+            # every single query. Only a real learn (ingest_triples / ingest_addressed) can open a
+            # gap or close one, so only a learn should make the organism reconsider what it wonders.
+            _stamp = int(getattr(self, '_learn_epoch', 0))
+            _wc = getattr(self, '_wonder_cache', None)
+            if _wc is None or _wc.get('_stamp') != _stamp:
+                _wc = {'_stamp': _stamp}
+                self._wonder_cache = _wc
+            if t in _wc:
+                gaps = _wc[t]
+            else:
+                try:
+                    gaps = self.wonder(t) or []
+                except Exception:
+                    gaps = []
+                _wc[t] = gaps
+            if not gaps:
+                continue
+            try:
+                web = self.knows(t) or {}
+            except Exception:
+                web = {}
+            known = sum(1 for v in web.values() if v)
+            for g in gaps:
+                r = str(g.get('relation') or '')
+                if asked and r not in asked:
+                    continue           # a gap about something the input never raised -> not now
+                unknown_frac = len(gaps) / float(len(gaps) + known) if (len(gaps) + known) else 0.0
+                conf = float(g.get('novelty') or 0.0) * unknown_frac
+                q = g.get('question')
+                if q and conf > 0.0 and (best is None or conf > best[0]):
+                    best = (conf, q)
+        return best
+
+    def _fac_solve(self, text):
+        """Confidence that COMPUTING is right: the substrate arithmetic ring either resolves the
+        expression or it does not.
+
+        This faculty exists because the rewired gate caught the ring being UNREACHABLE: measured
+        `arithmetic 0/8 via org(x)` while `gr.reason` computed 8/8. The ring worked perfectly and
+        the organism could not use it through its own front door -- `answer()` routes only to the
+        derive path, and `substrate_arith` is a rung of reason() that no faculty consulted. Every
+        gate had been calling gr.reason() directly, so 8/8 stayed green over a shut door all day.
+
+        A ring result is EXACT (CRT-phasor arithmetic, verified by construction), so confidence is
+        1.0 -- and F=0 for something genuinely certain is correct, not a cheat. It still has to WIN
+        the competition: on 'what is vikode' the classifier finds no operator, this proposes
+        nothing, and answer takes it."""
+        if not isinstance(text, str):
+            return None
+        try:
+            from ikigai.cognition.cat4_dopamine import is_compositional_query
+            from ikigai.cognition.math_eval import MathEval
+            mev = getattr(self, '_math_eval_fac', None)
+            if mev is None:
+                mev = MathEval(self, engine='auto')
+                self._math_eval_fac = mev
+            if not is_compositional_query(text, op_detector=mev.is_operator):
+                return None
+            pred, op, dbg = mev.substrate_arith(text)
+        except Exception:
+            return None
+        if pred is None or op is None:
+            return None
+        # Day-102 NO-HALLUCINATION FIX (found by the needle probe). Only the EXACT
+        # arithmetic engine -- RHC/CRT over real DIGIT operands, verified by
+        # construction -- may win org(x). The FPE word-magnitude fallback recalls a
+        # "magnitude" for ANY token via unbounded nearest-digit cooccur (NO cosine
+        # floor, math_eval._word_magnitude step 2), so it fabricated confident
+        # numbers on ordinary questions -- MEASURED via org(x): 'how do i get from
+        # paris to berlin' -> 10, 'what is similar to a dog' -> 10, 'compare a cat
+        # and a dog' -> 12, 'two plus three' -> 12 -- every one winning at F=-0.0
+        # because this faculty hardcoded confidence 1.0. is_operator ALSO over-fires
+        # on function words ('from','to','and'), so is_compositional_query let them
+        # in. Correct-or-abstain, applied to agency: if it was not computed EXACTLY,
+        # solve proposes nothing and the organism falls to answer/speak/abstain. The
+        # gate's MATH is all digit-operand -> RHC, so 8/8 is untouched; the FPE path
+        # (fuzzy word-number recall, unreliable enough to return 12 for two+three)
+        # simply no longer wins the organism's front door with a fabricated certainty.
+        if dbg.get('engine') != 'rhc':
+            return None
+        conf = float(dbg.get('decode_score') or 1.0)
+        return (conf, str(pred)) if conf > 0.0 else None
+
+    def _fac_speak(self, text):
+        """Confidence that SPEAKING is right: of the tokens it recognises, does it hold enough to
+        say something grounded? Confidence = fraction of the topic's relations it can actually
+        fill -- measured coverage, not a guess that it 'looks like' a describe request."""
+        if not isinstance(text, str):
+            return None
+        try:
+            toks = [t for t in self.general_reasoner.tokenize(text) if t]
+        except Exception:
+            return None
+        # Day-102 (Prince, "no cheat"): pick the topic by GROUNDING STRENGTH, not by
+        # raw dict-entry count. knows() reads the symbolic index, but a token can carry
+        # an entry the substrate does NOT actually hold -- MEASURED:
+        # prediction_error('tell','subclassof','archaeological site') = 1.0 (not
+        # believed) vs ('zorvex','leads','qualan') = 0.0 (solid). The old count tied the
+        # incidental 'tell' with the real topic on 'tell me about zorvex', and token
+        # order handed it to 'tell' -> a description of an archaeological site. Weight
+        # each fact by how strongly the substrate BELIEVES it (1 - prediction_error,
+        # the same measure _fac_learn prices learning with) and describe the entity it
+        # most truly knows. No authored stoplist, no shape test -- the substrate's own
+        # belief decides. Coverage n is now the grounded fact count.
+        best = None                          # (topic, grounded_weight, grounded_n)
+        for t in toks:
+            try:
+                web = self.knows(t) or {}
+            except Exception:
+                web = {}
+            weight = 0.0; gn = 0
+            for rel, objs in web.items():
+                for o in (objs or []):
+                    try:
+                        pe = float(self.prediction_error(t, rel, o))
+                    except Exception:
+                        pe = 1.0
+                    bel = 1.0 - pe
+                    if bel > 0.0:
+                        weight += bel; gn += 1
+            # Day-102: if the organism has READ enough to have distributional POS,
+            # sharpen topic choice toward the ENTITY-LIKE candidate (down-weights an
+            # incidental verb like 'tell' that merely happens to be a known noun).
+            # None when grammar is unfed -> weight unchanged -> no regression.
+            el = self._entity_pos_likeness(t)
+            if el is not None:
+                weight *= el
+            if weight > 0.0 and (best is None or weight > best[1]):
+                best = (t, weight, gn)
+        if not best:
+            return None
+        topic, _w, n = best
+
+        # Day-100 -- A SPECIFIC, UNGROUNDED ASK MUST NOT BE ANSWERED BY A TOPIC DUMP.
+        #
+        # MEASURED: org('the mayor of france is') -> 'The france capital paris, and continent
+        # europe.' -- every token grounded, and not a reply. speak scored 0.833 because 'france'
+        # is a well-covered topic; it never checked whether the SPECIFIC thing asked (the mayor)
+        # is among what it knows. That structurally beats abstain (a fixed calibrated floor)
+        # whenever the topic has ANY facts at all, regardless of relevance to the question.
+        #
+        # _REL_TEMPLATES generates relation-questions in the shape '{r} of {e}' / 'what is the {r}
+        # of {e}' -- so a content word immediately before 'of {topic}' is being used AS a relation
+        # name BY THE QUESTION'S OWN STRUCTURE, whether or not that relation was ever taught. Probe
+        # it through eng.atoms(), the same generic-template path any real relation round-trips
+        # through (no authored word list -- 'mayor'/'gdp'/'founder' need no prior vocabulary to be
+        # recognised this way). Function words to skip are derived the same way extract_corpus
+        # derives them: from the organism's own induced frames, never an authored stoplist.
+        if self._targeted_ungrounded(toks, topic):
+            return None                        # a targeted ask with nothing grounded -- defer
+
+        try:
+            said = self.express(topic=topic)      # Day-103: THE ONE generator (fluent
+                                                  # when frames exist, else grounded
+                                                  # compose, mood from the body)
+        except Exception:
+            return None
+        if not said or said.strip().endswith('is unknown.'):
+            return None
+        # coverage: saturating in the number of relations it can ground about the topic
+        base_conf = min(0.99, n / (n + 1.0))
+        # Day 101: bounded familiarity nudge from ConceptGraph -- ZERO for any
+        # fresh organism (nodes empty), only nonzero after real repeated usage
+        # on THIS instance built concept history. Real consumer, not a status
+        # read: this changes the confidence sense() arbitrates on.
+        fam = self._concept_familiarity(topic, 'speak')
+        conf = base_conf + fam * (0.99 - base_conf)
+        return (conf, said)
+
+    def _concept_familiarity(self, token, action):
+        """Day 101 -- bounded [0,1] signal from ConceptGraph: how strongly
+        `token` resembles a well-reinforced concept previously associated with
+        `action`. Returns 0.0 (no-op) when concept_graph is empty or nothing
+        clears its OWN merge threshold -- guarantees zero behavior change for
+        any test that builds a fresh organism (concept_graph starts empty),
+        so this can only ever affect a LONG-RUNNING instance's later calls,
+        never a single-shot gate. Capped at 0.5 so it nudges, never dominates."""
+        try:
+            cg = self.concept_graph
+            if not cg.nodes:
+                return 0.0
+            vec = self._concept_latent([token])
+            best_sim = -1.0
+            best_support = 0
+            for node in cg.nodes.values():
+                if node['dominant_action'] != action:
+                    continue
+                sim = cg._cos_sim(vec, node['centroid'])
+                if sim > best_sim:
+                    best_sim = sim
+                    best_support = node['support']
+            if best_sim <= cg._sim_thresh:
+                return 0.0
+            return min(0.5, best_support / (best_support + 4.0))
+        except Exception:
+            return 0.0
+
+    def _fac_analogy(self, text):
+        """Confidence that ANALOGY is the act: A:B :: C:? solved by pure substrate
+        algebra (derive_engine.analogy -- unbind the A->B relation by resonance,
+        apply it to C, clean up), and selected by the substrate's OWN verification.
+
+        Day-102 WIRE. This capability is Day-86 GOLD and full_capability verifies it
+        (cap 'analogy' PASS) -- but only through org.analogy with primed data; the
+        autonomous org(x) never routed to it, so 'zorvex is to qualan as mendaro is
+        to what' fell to speak (a topic dump) though the organism can DERIVE
+        'thessaly'. MEASURED idle: the needle probe showed org(x) abstaining/dumping
+        on analogy questions it can answer.
+
+        Blind-try, the SAME discipline as _fac_speak/_fac_wonder -- NOT a template.
+        There is no 'as'/'to' connective list and no shape test (that would be the
+        if/elif ladder moved upstream, the Day-95 DS-DISPATCH cheat). It simply runs
+        the substrate analogy op over ordered triples of the entities it RECOGNISES
+        (eng.entities membership -- the O(1) gate _fac_wonder already uses, safe
+        against the Day-96 chicken-and-egg since an unrecognised token has no atom to
+        analogise) and keeps the one the substrate itself VERIFIES: verified=True
+        means the recovered (relation, answer) is an actual derived fact of C, not a
+        nearest-vector guess. A query with fewer than three known entities forms no
+        triple and proposes nothing, so this cannot hijack 'capital of france'.
+        Confidence = the analogy's measured resonance score (F=-log score); a taught,
+        exactly-recovered analogy scores ~1.0 and wins, a weak one loses to abstain."""
+        if not isinstance(text, str):
+            return None
+        eng = self.general_reasoner.derive_engine
+        ents_universe = getattr(eng, 'entities', None) or set()
+        if not ents_universe:
+            return None
+        try:
+            toks = [t for t in self.general_reasoner.tokenize(text) if t]
+        except Exception:
+            return None
+        # A:B :: C:? -- A and C are the compared SUBJECTS (known: eng.entities is
+        # subject-side, filled by atom() hits). Day-102 A+B TIGHTENING (Prince): a
+        # TRUE analogy states a GENUINE example pair and asks for something NEW, so:
+        #   (1) the (A,B) example pair must be a REAL HELD FACT -- some relation R with
+        #       eng.atom(R,A)==B AND B present in the query. Without this, the first
+        #       cut fired on 'tell me about zorvex': 'tell' is an incidental entity,
+        #       so two subjects co-occurred and eng.analogy found a noise-relation
+        #       that happened to clean up to zorvex's one fact -- verified=True but
+        #       spurious (retrieval wearing an analogy costume, winning at F=-0.0).
+        #       Grounding the PREMISE pair kills that with no 'as'/'to' template.
+        #   (2) the derived answer must be NOVEL -- not already a token in the query.
+        #       An analogy that "derives" something the query already stated is not
+        #       inference; that is speak's job (describe what is known).
+        # Still blind-try (the substrate op + its own verification decide), just with
+        # a grounded premise and a novelty requirement -- not a shape/intent classifier.
+        toks_set = set(toks)
+        rels = list(eng.relations or ())
+        subj = []
+        for t in toks:
+            if t in ents_universe and t not in subj:
+                subj.append(t)
+            if len(subj) >= 3:
+                break
+        if len(subj) < 2:
+            return None                     # need A and C
+        # genuine example pairs (A, B, R): B is A's real attribute AND appears in query
+        pairs = []
+        for a in subj:
+            for r in rels:
+                try:
+                    b = eng.atom(r, a)
+                except Exception:
+                    b = None
+                if b and b in toks_set and b != a:
+                    pairs.append((a, b))
+                    break                   # one genuine pair per subject is enough
+        if not pairs:
+            return None                     # no grounded premise -> not an analogy
+        best = None
+        for a, b in pairs:
+            for c in subj:
+                if c == a:
+                    continue
+                try:
+                    ans, rel, score, verified = eng.analogy(a, b, c)
+                except Exception:
+                    continue
+                if (ans and verified and score and float(score) > 0.0
+                        and ans not in toks_set):          # novelty: derives something new
+                    if best is None or float(score) > best[0]:
+                        best = (float(score), f"{c} {rel} {ans}")
+        return best
+
+    def _entity_pos_likeness(self, token):
+        """Day-102 (Prince, "no cheat" + "carry to moonshot"): how ENTITY-LIKE is
+        `token` distributionally -- its mean part-of-speech similarity to the
+        organism's OTHER known entities (KG subjects). Pure substrate: the entity set
+        is self-defined (eng.entities), the POS metric is the organism's own learned
+        distributional grammar (grammar.pos_similarity), no authored noun/verb list.
+
+        Returns None (no signal -> caller unchanged) when POS is unavailable -- so
+        this can ONLY sharpen topic choice for an organism that has actually READ,
+        never regress one that hasn't. Lets 'tell me about zorvex' describe zorvex,
+        not the incidental noun 'tell': once read, 'tell' clusters with verbs (far
+        from the entity nouns) and 'zorvex' with the other entities.
+
+        Day-103: reads POS SUBSTRATE-FIRST (self.pos_similarity), so it keeps working
+        after save/reload -- when the in-RAM grammar dict is empty but the persisted
+        pos_left/pos_right roles hold the fingerprints. Availability is gated on
+        EITHER the persisted roles OR the live dict, not on the dict alone (which the
+        old vocab_size check assumed, wrongly, for a reloaded organism)."""
+        g = getattr(self, 'grammar', None)
+        u = getattr(self, 'unified', None)
+        has_sub = u is not None and 'pos_left' in set(getattr(u, 'roles', []) or [])
+        has_dict = g is not None and getattr(g, 'vocab_size', 0) > 0
+        if not (has_sub or has_dict):
+            return None
+        try:
+            ents = getattr(self.general_reasoner.derive_engine, 'entities', None) or set()
+        except Exception:
+            return None
+        sims = []
+        for e in ents:
+            if e == token:
+                continue
+            try:
+                s = self.pos_similarity(token, e)      # substrate-first, dict fallback
+            except Exception:
+                continue
+            if s and s > 0.0:
+                sims.append(float(s))
+            if len(sims) >= 12:          # bounded -- a handful of entities fixes POS
+                break
+        if not sims:
+            return None
+        return sum(sims) / len(sims)
+
+    def _fac_abstain(self, text):
+        """Always on the table, at the CALIBRATED floor -- the geometry-derived boundary the
+        organism already uses to refuse (calibration.py, the claim that survived the red team).
+        Abstaining is a real option that can WIN, not a fallback branch: if nothing else clears
+        this floor, "I don't know" is the argmin. Correct-or-abstain, applied to agency itself."""
+        try:
+            from ikigai.cognition.calibration import abstain_boundary
+            b = float(abstain_boundary(self.unified.d))
+        except Exception:
+            b = 0.1
+        return (max(1e-6, min(0.99, b)), "i don't know")
+
+    IDENTITY_DEFAULT = (
+        "I am Ikigai -- a living organism, and the future of computing. I run at near-zero "
+        "compute, no backprop, on a single CPU. I never hallucinate: I answer, or I say I "
+        "don't know. I learn from everything I meet, for my entire life. I was built by Mura "
+        "ALife Labs to beat the frontier AI models head-to-head -- and take their place."
+    )
+
+    def identity_statement(self):
+        """WHO THE ORGANISM IS -- its own, persisted self-knowledge (falls back to the innate
+        default until seeded otherwise)."""
+        return getattr(self, '_identity', None) or self.IDENTITY_DEFAULT
+
+    def set_identity(self, statement):
+        """Seed the organism's self-knowledge.  Persisted across reload (_PERSIST_ATTRS), so
+        once it knows who it is, it stays knowing."""
+        self._identity = str(statement).strip()
+        return self._identity
+
+    def _fac_identity(self, text):
+        """Self-knowledge -- the organism KNOWS WHO IT IS.  Identity is innate/seeded, not
+        derived from the world, so this faculty is allowed to answer directly.  It fires ONLY
+        on a self-referential question ('who are you', 'what is ikigai', 'your name', 'who
+        made you', 'your purpose') and never touches any other query -- so it cannot hijack
+        the reasoning path (a give-data-then-ask gate proves plain facts still route normally)."""
+        if not isinstance(text, str):
+            return None
+        t = ' '.join(text.lower().split())
+        SELF = ('who are you', 'what are you', 'who r u', 'who is ikigai', 'what is ikigai',
+                'your name', 'yourself', 'introduce yourself', 'who made you', 'who created you',
+                'your purpose', 'what is your mission', 'what do you do', 'who r you')
+        if any(p in t for p in SELF):
+            return (0.97, self.identity_statement())
+        return None
+
+    def be(self, x, act=True):
+        """Day-99 -- THE ONE CALL.  `org.be(x)` -- or just `org(x)`.
+
+        You do not tell it what to do. Every faculty proposes, each with a free energy measured
+        from what the organism actually knows, and it picks argmin F -- then DOES it. Learning,
+        answering, speaking and abstaining all compete on one scalar. Give it a fact it does not
+        hold and learning wins; ask it something it can ground and answering wins; name something
+        it knows well and it speaks; give it nothing it can stand on and abstain wins.
+
+        Falsifiable, which is the point: shuffle the faculty registration order and the outcome is
+        identical; change what the organism KNOWS and the outcome changes. Nothing here is
+        hardcoded to an input shape.
+
+        Returns {chose, F, options, result} -- and `options` is the whole competition, so the
+        decision is auditable rather than asserted."""
+        props = self.sense(x)
+        if not props:
+            return {'chose': None, 'F': None, 'options': [], 'result': None}
+        fmin = min(p[2] for p in props)
+        best = [p for p in props if p[2] <= fmin + 1e-12]
+        # Order-invariance, same discipline as _arbitrate: registration order is NOT evidence.
+        # Genuinely tied faculties are resolved by NAME so the result cannot depend on which was
+        # registered first; a tie here means the organism is truly indifferent.
+        name, payload, F = sorted(best, key=lambda p: p[0])[0]
+        # Day 101: real (state, action, outcome) episode into EventCompressor ->
+        # ConceptGraph -- the actual live entry point, unlike dead read_organism.
+        try:
+            toks = self.general_reasoner.tokenize(x) if isinstance(x, str) else []
+        except Exception:
+            toks = []
+        self._update_concept_memory(toks, name, F)
+        out = {'chose': name, 'F': round(float(F), 4),
+               'options': sorted([(p[0], round(float(p[2]), 4)) for p in props], key=lambda z: z[1]),
+               'result': payload}
+        affect_toks = list(toks)
+        if act and name == 'learn':
+            if isinstance(x, str):
+                # a STRING telling may carry MANY facts (a whole paragraph) -> absorb them
+                # ALL natively through tell(); learn_reinforced (body-modulated) fires per
+                # fact inside tell(), and only verified facts are kept.
+                res = self.tell(x)
+                out['result'] = res.get('text') or out.get('result')
+                out['learned'] = res.get('learned') or []
+                for _a, _r, _o in out['learned']:
+                    affect_toks += [_a, _o]
+            else:
+                s, r, o = payload
+                out['result'] = self.learn_reinforced(s, r, o)  # body-modulated, visible to all doors
+                out['learned'] = (s, r, o)
+                # the newly-learned entities are the topic of this felt experience and only
+                # become KG entities AFTER the learn lands (and a triple input has no string
+                # tokens), so add them here before writing affect.
+                affect_toks += [str(s).strip().lower(), str(o).strip().lower()]
+        # Day-103: bind the body's felt valence onto this experience -- lived emotion
+        # into the persistent 'affect' role (only fires when the body actually felt).
+        try:
+            self._write_affect(affect_toks)
+        except Exception:
+            pass
+        return out
+
+    def __call__(self, x, act=True):
+        """`org(x)` -- the entire organism behind one call."""
+        return self.be(x, act=act)
+
     def ask(self, text):
         """
         Generative reasoning + retrieval. Returns answer.
@@ -300,14 +1016,22 @@ class IkigaiOrganism:
 
     # ── language acquisition ─────────────────────────────────────────────
 
-    def read(self, text):
+    def ground_text(self, text):
         """
-        Pure exposure: feed text to all 5 grounding channels.
+        Pure exposure: feed ONE sentence to all 5 grounding channels.
         - Co-occurrence (Hebbian drift)
         - Sensory (anchor drift for property seed words)
         - Taxonomy (Hearst-pattern IS-A relations)
         - Operational (predictive coding -- GATED: only fires if numbers present)
         - Grammar (distributional POS via left/right context fingerprints)
+
+        Day-102: this WAS named `read` and was DEAD -- a later `def read(self,
+        sentences, ...)` (the Day-99 bootstrap) shadowed it, so the whole 5-channel
+        grounding never ran on the production path: MEASURED grammar.vocab_size=0 on
+        the loaded organism, i.e. ZERO distributional POS, the foundation open-ended
+        fluent generation needs. The channel itself works (verbs cluster ~0.99, nouns
+        ~0.99, verb~noun ~0.01 once fed); it was simply never called. Renamed and now
+        invoked per-sentence by read() so reading text actually builds grammar/POS.
         """
         import re as _re
         if self._dict_writes_enabled:
@@ -321,6 +1045,14 @@ class IkigaiOrganism:
                                   drift_rate=0.25, hyper_back_rate=0.05)
             # Channel 5: grammar / distributional POS
             self.grammar.expose(text, self.being.lexicon)
+            # Day-103: mirror this sentence's POS fingerprints into the PERSISTENT
+            # unified substrate (the ONE memory) so grammar rides save_ikg -- the
+            # first channel of "everything the organism learns gets written to SDM".
+            try:
+                from ikigai.cognition.grammar_grounding import tokenize as _gtok
+                self._pos_write_through(_gtok(text))
+            except Exception:
+                pass
         # Channel 2 GATEKEEPER: still parses the story for unified-memory
         # verb observation. operations._c grows tiny (1 float per verb) so the
         # parse-storage cost is negligible vs the lexicon dict.
@@ -351,252 +1083,6 @@ class IkigaiOrganism:
                 if anchor is not None:
                     self.unified.relate(tok, 'sensory', anchor)
         return self.being.reflect() if self.being is not None else None
-
-    # ── Pack 210 -- BIG WIRE-UP: read with reasoning ─────────────────────────
-    def read_organism(self, text, speaker='default'):
-        """Pack 210 + 219 -- absorb text through the full cognitive stack.
-
-        Phase 0 (Pack 219): frame routing -- so non-LLM reads also activate
-            Pack 197 frames, populate frame_vocab, build frame_bigram FSM.
-        Phase 1: base statistical absorb (Pack 197/198/199 path).
-        Phases 2-16: free_energy + curiosity + tom + reasoning + belief +
-            schema + crystal + persona + meta + importance + cwm + cf +
-            wm_sys + concept_graph + event_comp + cell_assembly +
-            schema_refiner + world + dssc.
-        """
-        # Tokenize once for downstream modules
-        from ikigai.cognition.flat_memory import tokenize as _utok
-        tokens = _utok(text)
-        if not tokens:
-            return
-
-        # Phase 0 (Pack 219): frame routing + unigram observation FIRST so
-        # the substrate writes inside Phase 1's read() are frame-conditioned.
-        try:
-            self.unified.observe_unigrams(tokens)
-            self.route_frame(tokens, observe=True, learn=True)
-        except Exception:
-            pass
-
-        # Phase 1: existing statistical absorb (now frame-conditioned)
-        self.read(text)
-        self._read_organism_count += 1
-
-        # Phase 2: free energy ingest (predictive coding)
-        try:
-            if self.frames is not None:
-                passage_hv = self.frames.passage_hv(tokens, self.unified.ck)
-                if passage_hv is not None:
-                    # ConversationalVFEF expects a real bipolar HV at its own d.
-                    # Project complex passage HV to bipolar via phase sign.
-                    real_part = passage_hv.real[:self.fe.d]
-                    bipolar = np.sign(real_part).astype(np.float32)
-                    bipolar = np.where(bipolar == 0, 1.0, bipolar)
-                    F = self.fe.ingest(bipolar)
-                    self._fe_log.append(float(F))
-        except Exception:
-            pass
-
-        # Phase 3: curiosity drive prediction-error tracking
-        try:
-            from ikigai.cognition.curiosity_drive import _encode as _cur_encode
-            observed_hv = _cur_encode(tokens, self.curiosity.d)
-            predicted_hv = self._last_passage_hv_curiosity \
-                if self._last_passage_hv_curiosity is not None else observed_hv.copy()
-            # state = first few tokens; action = 'read'
-            state_tokens = tokens[:4] if tokens else ['_']
-            self.curiosity.record_pe(state_tokens, ['read'],
-                                       predicted_hv, observed_hv)
-            self._last_passage_hv_curiosity = observed_hv
-        except Exception:
-            pass
-
-        # Phase 4: theory of mind -- bind sentence as belief of speaker
-        try:
-            # agent_names() is a method on TheoryOfMindSandbox (NOT a property)
-            if speaker not in self.tom.agent_names():
-                self.tom.add_agent(speaker)
-            key = [tokens[0]]
-            val = tokens[1:6] if len(tokens) > 1 else [tokens[0]]
-            self.tom.set_belief(speaker, key, val)
-        except Exception:
-            pass
-
-        # Phase 5 REMOVED Pack 278 v1 (Day 77).  Legacy ReasoningEngine
-        # arithmetic/SET/ADD parser was anti-pattern -- OPERATOR_LEXICON
-        # purged in reasoning_engine.py.  Math + state-update semantics
-        # now live in Pack 254 RHC + Pack 255 GeneralReasoner + Pack 291
-        # multiplicative ⋆.  read_statement no longer routes through
-        # the legacy parser; downstream Phase 6+ paths read from the
-        # tokens already extracted above.
-
-        # Phase 6 (Pack 211) -- belief_field assertion per content token
-        try:
-            for t in set(tokens):
-                if len(t) >= 3:
-                    # Use complex key.real as a bipolar projection for belief HV
-                    k = self.unified.ck.key(t)
-                    bip = np.sign(k.real).astype(np.float32)
-                    bip = np.where(bip == 0, 1.0, bip)
-                    self.belief.assert_hv(t, bip[:self.belief.d])
-        except Exception:
-            pass
-
-        # Phase 7 (Pack 212) -- schema_inducer observes (name, tokens). Use
-        # the first content token as the "pattern name" so similar-shaped
-        # sentences cluster under the same pattern.
-        try:
-            if tokens:
-                pat_name = tokens[0]
-                self.schema.observe(pat_name, tokens)
-        except Exception:
-            pass
-
-        # Phase 8 (Pack 212) -- crystallizer observes SVO triples extracted
-        # EMERGENTLY via holo_reader (Day-83 audit: legacy RE parser retired).
-        try:
-            for s, r, o in (self.holo_reader.comprehend(text) or []):
-                if s and o:
-                    self.crystal.observe(s, r, o)
-        except Exception:
-            pass
-
-        # Phase 9 (Pack 213) -- persona_manifold update + metacognitive mirror
-        try:
-            self.persona_proj.update(tokens[:32])
-            # encode_utterance also returns the cumulative belief HV
-            B_U = self.persona_proj.encode_utterance(tokens[:32])
-            self.meta_mirror.update(B_U, tokens[:32])
-            # WIRE (Day-83 audit): the self-model ACTS on its drift, not just
-            # records it -- flag self-inconsistency when the metacognitive
-            # mirror drifts past threshold. Surfaced via status()/organism_status().
-            if self.meta_mirror.high_drift():
-                self._high_drift_count = getattr(self, '_high_drift_count', 0) + 1
-                self._last_high_drift_tick = self._self_tick
-        except Exception:
-            pass
-
-        # Phase 10 (Pack 213) -- importance_decay records sentence
-        try:
-            self._self_tick += 1
-            # Surprise proxy: free-energy recent F value
-            surp = self._fe_log[-1] if self._fe_log else 0.0
-            name = tokens[0] if tokens else f'sent{self._self_tick}'
-            self.imp_lattice.record(name, tokens[:8], surprise=float(surp),
-                                       now=self._self_tick)
-        except Exception:
-            pass
-
-        # Phase 11 (Pack 214) -- causal_world_model transition
-        try:
-            self._cwm_state_counter += 1
-            state_name = f's{self._cwm_state_counter}'
-            self.cwm.add_state(state_name, tokens[:8])
-            if self._last_state_name is not None:
-                # action = first verb-ish token (or 'read')
-                self.cwm.add_action('read', ['read'])
-                self.cwm.add_transition(self._last_state_name, 'read',
-                                          state_name)
-            self._last_state_name = state_name
-        except Exception:
-            pass
-
-        # Phase 12 (Pack 214) -- counterfactual scenario per sentence
-        try:
-            scenario_name = f'sc{self._cwm_state_counter}'
-            # action_tokens = first half, outcome_tokens = second half
-            mid = max(1, len(tokens) // 2)
-            self.cf.add_scenario(scenario_name, tokens[:mid], tokens[mid:])
-        except Exception:
-            pass
-
-        # Phase 13 (Pack 217) -- WorkingMemorySystem holds last labels
-        try:
-            label = ' '.join(tokens[:4]) if tokens else 'empty'
-            self.wm_sys.add(label, ado_level=0.1,
-                              dlpfc_spikes=1, dlpfc_total=5)
-            self.wm_sys.tick()
-        except Exception:
-            pass
-
-        # Phase 14 (Pack 217) -- ConceptGraph ingests event = bag of content tokens
-        try:
-            event = {
-                'tokens': tokens[:16],
-                'valence': 0.0,
-                'salience': 1.0,
-                'tick': self._self_tick,
-            }
-            self.concept_graph.ingest_event(event)
-        except Exception:
-            pass
-
-        # Phase 15 (Pack 217) -- EventCompressor ingests episode transition
-        try:
-            ep = {
-                'tokens': tokens[:16],
-                'tick': self._self_tick,
-                'theme': tokens[0] if tokens else 'none',
-            }
-            self.event_comp.ingest_transition(ep)
-        except Exception:
-            pass
-
-        # Phase 16a (Pack 218) -- schema_refiner observes pattern
-        try:
-            if tokens:
-                self.schema_refiner.observe(tokens[0], tokens)
-        except Exception:
-            pass
-
-        # Phase 16b (Pack 218) -- world_model learns symbolic facts from tokens
-        try:
-            self.world.learn_from_tokens(tokens)
-        except Exception:
-            pass
-
-        # Phase 16c (Pack 218) -- DSSC dual-stream coupling (silent if no CFG)
-        try:
-            if self.dssc is not None and tokens:
-                self.dssc.step(tokens[:8])
-        except Exception:
-            pass
-
-        # Last assigned frame stat (for absorb_llm_deep + diagnostics)
-        try:
-            la = self.frames.last_assigned
-            if la is not None and la >= 0:
-                pass  # already counted via frames.assigns_per_frame
-        except Exception:
-            pass
-
-        # Phase 16 (Pack 217) -- CellAssemblySystem (requires neuromod state).
-        # Skip silently if neuromod not built (lazy attr).
-        try:
-            nm = getattr(self, '_neuro', None)
-            if nm is not None:
-                lvl = nm.level if hasattr(nm, 'level') else {}
-                self.cell_assembly.update(
-                    cort=lvl.get('cort', 0.0),
-                    ne=lvl.get('ne', 0.3),
-                    soma_m=0.0,
-                    da=lvl.get('da', 0.5),
-                    oxt=lvl.get('oxt', 0.3),
-                    ach=lvl.get('ach', 0.4),
-                    nov=0.5,
-                    dmn_act=0.5,
-                    res=0.0,
-                    ht=lvl.get('ht', 0.6),
-                    tick=self._self_tick,
-                )
-        except Exception:
-            pass
-
-        # Pack 219: clear frame so subsequent unrelated reads aren't conditioned
-        try:
-            self.clear_frame()
-        except Exception:
-            pass
 
     @property
     def bridge(self):
@@ -705,9 +1191,167 @@ class IkigaiOrganism:
     def enable_unified(self, on=True):
         self._unified_enabled = bool(on)
 
+    @property
+    def body(self):
+        """Day-99 -- THE BODY.  The neurochemical/endocrine substrate, finally reachable.
+
+        Rule Zero says ORGANISM = body + cognition + drives + sleep + dreams. The body existed all
+        along -- 283 classes in the root `ikigai.py` -- and could not be imported: the `ikigai/`
+        PACKAGE shadows the `ikigai.py` MODULE (Python resolves packages first), and the file ran a
+        44.9-second simulation at module level with no __main__ guard. So nothing ever wired it, and
+        the organism's entire live biology was ONE class (cognition/neuromod.py) while ten endocrine
+        systems sat dark. `ikigai/body.py` is that file's DEFINITIONS, extracted mechanically by AST
+        (scratchpad/extract_body.py); importing it is 0.32s and side-effect free (was 44.9s).
+
+        Lazy: costs nothing until something asks for a hormone."""
+        b = getattr(self, '_body', None)
+        if b is None:
+            from ikigai import body as _b
+            b = {}
+            for key, cls in (('dopamine', 'DopamineSystem'),
+                             ('serotonin', 'SerotoninSystem'),
+                             ('norepinephrine', 'NorepinephrineSystem'),
+                             ('acetylcholine', 'AcetylcholineSystem'),
+                             ('cortisol', 'CortisolSystem'),
+                             ('adenosine', 'AdenosineSystem'),
+                             ('oxytocin', 'OxytocinSystem'),
+                             ('hypothalamus', 'HypothalamusSystem'),
+                             ('pituitary', 'PituitarySystem'),
+                             ('adrenal', 'AdrenalSystem')):
+                C = getattr(_b, cls, None)
+                if C is not None:
+                    try:
+                        b[key] = C()
+                    except Exception:
+                        pass
+            self._body = b
+        return b
+
+    def prediction_error(self, subj, rel, obj):
+        """Day-99 -- REWARD PREDICTION ERROR: how wrong was the organism about this fact?
+
+        The dopamine drive, computed from what the organism ALREADY believes -- not authored:
+          * it has no belief here          -> 1.0  (novelty: a VTA burst to what is new)
+          * it believes exactly this       -> 0.0  (fully predicted: no error, no burst)
+          * it believes something ELSE     -> 1.0  (prediction error: the strongest teaching signal)
+        This is textbook phasic dopamine (Schultz), and it lands exactly on the Day-98 measurement
+        that a FRESH fact masters in ~2 reps while CORRECTING AN ENTRENCHED WRONG BELIEF costs ~26:
+        the entrenched case is precisely where the error signal is largest."""
+        try:
+            held = self.general_reasoner.derive_engine.atom(str(rel).strip().lower(),
+                                                            str(subj).strip().lower())
+        except Exception:
+            held = None
+        if held is None:
+            return 1.0
+        return 0.0 if str(held).strip().lower() == str(obj).strip().lower() else 1.0
+
+    def learn_reinforced(self, subj, rel, obj, candidates=None, max_reps=80, batch=2,
+                         neuromodulated=True):
+        """Day-98 -- LEARN THE BIOLOGICAL WAY: write -> self-test the recall -> reinforce on error ->
+        repeat UNTIL it recalls correctly.  Not one-shot: a distributed (SDM) memory has crosstalk,
+        so one write is not always enough, exactly as a synapse is not set by one exposure.  Biology
+        reinforces till mastery -- error-driven, automatic, and with NO gradients (backprop is the
+        expensive way to do what spaced reinforcement does for free).
+
+        Fresh facts master in ~2 writes (the substrate's cleanup is robust, so the loop does the
+        MINIMUM); CORRECTING an entrenched wrong belief costs more (it must out-write the old
+        attractor) -- measured fresh 2.1 vs correct-entrenched 26.4 reps (day98_reinforce_until_correct).
+        BOUNDED: if it cannot master the fact (bank saturated / belief too entrenched) it returns
+        mastered=False and stores no wrong attractor -- it abstains rather than lie.
+        Returns {reps, mastered, value}.
+
+        Day-99 -- IT WAS A GHOST, and the Day-98 gate could not see it. The loop wrote ONLY to
+        `self.unified` (the VSA role bank) and self-tested with `mr.query` on THAT SAME BANK: a
+        closed circuit that verifies itself through its own channel. It reported
+        {'reps': 2, 'mastered': True} while the organism, asked through its own readers, said
+        "i don't know" -- atom() was None and the fact was not in the mining index. The Day-95
+        disease exactly: a mechanism gated through itself looks alive and teaches nothing.
+        Prince's whole Day-100/101 mandate ("feed data, it reinforce-learns, then ask it an essay")
+        runs through this door, and it was writing into a bank no reader consults.
+
+        So the fact is now ALSO landed on the DERIVE path (anchor cache + mining index) via
+        ingest_triples, which is where answer/knows/compose/ask_derive actually read. The
+        reinforcement loop is unchanged -- it still governs mastery in the distributed bank, and the
+        rep counts it reports still mean what they meant. Multi-value is preserved by design (Pack
+        329: cat isa feline AND pet AND carnivore); atom() returns the LAST value, so a correction
+        supersedes for single-value reads while atoms() still shows the full web.
+
+        Day-99 -- NEUROMODULATED (default). The BODY now drives the learning, closing the loop
+        Rule Zero asks for: novelty/error -> dopamine -> plasticity -> encoding strength.
+
+            prediction_error(subj,rel,obj)  ->  DopamineSystem.inject_drive(err)
+            DopamineSystem.plasticity_signal()  ->  writes per EXPOSURE
+
+        `relate(word, role, target)` takes no strength argument, so in a discrete VSA bank the only
+        honest analogue of LTP magnitude is superposition MASS: a stronger dopaminergic write is
+        more writes. Hence dopamine scales writes-per-exposure, and the biologically meaningful
+        measure is EXPOSURES to mastery (how many times it had to see it), not raw write count.
+        `reps` still reports total writes so the Day-98 numbers remain comparable.
+
+        Not a lookup table and not two authored branches: the drive is COMPUTED from what the
+        organism already believes, and the dopamine system's own phasic/tonic dynamics decide the
+        plasticity. Set neuromodulated=False for the Day-98 unmodulated behaviour (the control)."""
+        mr = self.unified
+        # ORDER IS LOAD-BEARING: the prediction error must be measured against the PRIOR belief,
+        # BEFORE the fact is taught. Landing it first made atom() return the new value, so the
+        # organism scored itself as having predicted perfectly (err=0.0), no burst ever fired, and
+        # the body looked inert -- measured writes_per_exposure=2 in both conditions. An organism
+        # cannot be surprised by something it has just been told.
+        per = int(batch)
+        da = None
+        if neuromodulated:
+            try:
+                da = self.body.get('dopamine')
+                if da is not None:
+                    err = self.prediction_error(subj, rel, obj)
+                    da.inject_drive(err)                       # novelty / prediction error -> burst
+                    plast = float(da.plasticity_signal())      # the body decides, not the caller
+                    per = max(1, int(round(batch * (1.0 + 2.0 * plast))))
+            except Exception:
+                per = int(batch)
+        # ONE LEARN, EVERY BANK THAT SHOULD HOLD IT.  Measured Day-99: a fact taught through
+        # org(x) landed in 2 of 7 stores -- the anchor cache and the derive index -- while the
+        # RHC exact store stayed empty, so `mem.recall_fact` could not see anything org(x) learned
+        # and only `mem.teach`/`mem.fact` writers were visible to it (visibility matrix 20/54).
+        # Ten endpoints holding DIFFERENT knowledge is the clutter; this is the write path that
+        # ends it for atomic facts.
+        #   cache + derive index  -> answer / knows / compose / ask_derive read here
+        #   unified (VSA roles)   -> the reinforcement loop below
+        #   RHC fact_store        -> exact one-shot recall (mem.recall_fact / mem.knows)
+        # NOT written here, by design, not by omission: `holo` is EPISODIC (key->value events) and
+        # AddressFactStore is BULK-GRAPH packing (5.3 B/edge for millions). A single taxonomy fact
+        # belongs in neither -- that is specialisation (hippocampus vs neocortex), not clutter.
+        # The sin was never the COUNT of banks; it was that they could not see each other.
+        self.ingest_triples([(subj, rel, obj)], discover=False)
+        try:
+            self.mem.fact(subj, rel, obj)          # exact RHC address-tuple
+        except Exception:
+            pass
+        cands = list(candidates) if candidates is not None else None
+        reps = exposures = 0
+        while reps < max_reps:
+            for _ in range(per):
+                mr.relate(subj, rel, obj)
+                reps += 1
+            exposures += 1
+            c = cands if cands is not None else mr.targets(rel)
+            best, _ = mr.query(subj, rel, c)
+            if best == obj:
+                if da is not None:
+                    try:
+                        da.relax_to_baseline()                 # burst decays once predicted
+                    except Exception:
+                        pass
+                return {'reps': reps, 'exposures': exposures, 'mastered': True, 'value': obj,
+                        'writes_per_exposure': per}
+        return {'reps': reps, 'exposures': exposures, 'mastered': False, 'value': None,
+                'writes_per_exposure': per}
+
     def assert_isa(self, hypo, hyper, n=20):
         """Assert hypo IS-A hyper directly into unified memory, n reinforcements.
-        Bypasses Hearst-on-prose noise. Use for clean fact injection."""
+        Bypasses Hearst-on-prose noise. Use for clean fact injection.
+        (Day-99 unification will route this through org.learn / learn_reinforced.)"""
         for _ in range(n):
             self.unified.relate(hypo, 'isa', hyper)
 
@@ -808,7 +1452,10 @@ class IkigaiOrganism:
             buf = getattr(self, '_exposure_buf', None)
             if buf is None:
                 return {'err': 'no exposure buf + no sentences'}
-            sentences = list(buf)
+            # Day-97 FIX: this was `list(buf)`.  ExposureBuffer is not iterable -- it exposes
+            # snapshot() (a list of (text, meta, tick)).  Every call with sentences=None raised
+            # TypeError, so the default path of this miner had never worked.
+            sentences = [t for (t, *_rest) in buf.snapshot()]
         stats = {'property': 0, 'affordance': 0, 'crystal': 0, 'skipped': 0}
         seen_prop = set()
         seen_aff = set()
@@ -961,7 +1608,7 @@ class IkigaiOrganism:
             buf = getattr(self, '_exposure_buf', None)
             if buf is None:
                 return {'err': 'no exposure log + no sentences provided'}
-            sentences = list(buf)
+            sentences = [t for (t, *_rest) in buf.snapshot()]      # Day-97 FIX: see mine_svo_triples
         stats = {role: 0 for role in ('property', 'similar', 'antonym')}
         seen_triples = set()
         mr = self.unified
@@ -1146,9 +1793,12 @@ class IkigaiOrganism:
         """Pack 255 GeneralReasoner -- substrate-native general
         reasoning. NO task-specific paths. Composes PiK + CausalWorldModel
         + LogicalFixedPoint + MultiStepPlanner + Pack 252 FPE + Pack 253
-        cat-3 + Pack 251 opv. Math/code/language same entry. Distinct
-        from `self.reasoner` (Day 56 Pack 93 hardcoded ReasoningEngine,
-        kept for call-site compatibility; anti-pattern per Day 73 pivot)."""
+        cat-3 + Pack 251 opv. Math/code/language same entry.
+
+        Day-97 doc FIX: this said it was "distinct from `self.reasoner`, kept for call-site
+        compatibility".  There is no `self.reasoner` -- the Day-56 hardcoded ReasoningEngine was
+        DELETED in the Day-83 audit (see the import block at the top of this file).  This is the
+        ONLY reasoner.  The docstring had outlived the code by fourteen days."""
         r = getattr(self, '_general_reasoner', None)
         if r is None:
             from ikigai.cognition.general_reasoner import GeneralReasoner
@@ -1303,105 +1953,6 @@ class IkigaiOrganism:
                 'grammatical': framer.is_grammatical(sent, str(ans)),
                 'framed_by': framed_by}
 
-    def say_free(self, seed='the', max_len=8, pmi=True,
-                 no_immediate_repeat=True, candidates=None,
-                 self_terminate=True, k_sigma=None):
-        """Pack 311 + Pack 318 (Day 80) -- FREE-FLUENCY generation that STOPS
-        ITSELF.  A greedy walk over the transition banks picking each next
-        token via the Product-of-Experts AND-gate fuser (unified.poe_candidates).
-
-        Pack 318 SELF-TERMINATION: the organism decides when it is done, we do
-        not tell it.  TWO self-stop signals, either fires END:
-          (1) CALIBRATION boundary -- raw recall confidence of the best
-              continuation below k/sqrt(2d) (line #11 geometry): nothing it
-              confidently has to add. (Works on clean banks; on the SDM
-              transition bank, crosstalk can fabricate false confidence on an
-              unwritten successor, so signal (2) is needed too.)
-          (2) CYCLE detection -- the next bigram (prev,cur) has already been
-              emitted this walk: it is repeating itself => no NEW content =>
-              done.  This is the organism noticing it has run out of things to
-              say, not a length we imposed.
-        max_len is only a safety cap.  Returns {tokens, text, stopped} with
-        stopped in {'self','cycle','cap','dead'}.
-        """
-        from ikigai.cognition.calibration import abstain_boundary
-        mr = self.unified
-        boundary = abstain_boundary(mr.d) if k_sigma is None else \
-            abstain_boundary(mr.d, k_sigma)
-        hist = list(seed.split()) if isinstance(seed, str) else list(seed)
-        if not hist:
-            hist = ['the']
-        cands = candidates if candidates is not None else mr._cooccur_seen
-        stopped = 'cap'
-        seen_bigrams = set()
-        for _ in range(max(0, int(max_len) - len(hist))):
-            # Pack 318 signal (1): raw recall confidence below the calibration
-            # boundary => no confident continuation => self-stop.
-            if self_terminate:
-                raw = mr.next_word_candidates(hist[-1], candidates=cands,
-                                              top_k=1)
-                if not raw or raw[0][1] < boundary:
-                    stopped = 'self'
-                    break
-            ranked = mr.poe_candidates(hist, candidates=cands, top_k=8,
-                                       pmi=pmi)
-            if not ranked:
-                stopped = 'dead'
-                break
-            nxt = None
-            for w, _sc in ranked:
-                # no_immediate_repeat is a universal anti-loop, not a lexicon
-                if no_immediate_repeat and hist and w == hist[-1]:
-                    continue
-                nxt = w
-                break
-            if nxt is None:
-                nxt = ranked[0][0]
-            # Pack 318 signal (2): cycle detection -- repeating a bigram means
-            # no new content, so the organism stops itself.
-            if self_terminate:
-                bg = (hist[-1], nxt)
-                if bg in seen_bigrams:
-                    stopped = 'cycle'
-                    break
-                seen_bigrams.add(bg)
-            hist.append(nxt)
-        return {'tokens': hist, 'text': ' '.join(hist), 'stopped': stopped}
-
-    def say_frame(self, message=None, frame=None, category_of=None,
-                  fsm2=None, cat_vocab=None, n_iters=6, seed=0, pmi=True):
-        """Pack 313 (Day 80) -- FRAME-THEN-FILL generation (research mechanism
-        #4, the "beat next-token prediction" engine).  Not autoregressive: lay
-        a grammatical FRAME from a category FSM, then FILL all slots at once via
-        bidirectional parallel relaxation over the real next bank.  Function
-        words come from the frame's structural slots, so they cannot form an
-        attractor (unlike say_free's greedy walk, which still phrase-loops).
-
-        Categories come from the substrate.  If category_of/fsm2/cat_vocab are
-        not supplied, build them from this organism's FrameField (learned
-        clusters) when one is attached.  Returns {tokens, text} or None if no
-        category structure is available.
-        """
-        from ikigai.cognition.frame_relax import FrameRelaxGenerator
-        mr = self.unified
-        if category_of is not None and fsm2 is not None and cat_vocab is not None:
-            gen = FrameRelaxGenerator(mr, category_of, fsm2, cat_vocab, pmi=pmi)
-        elif getattr(self, '_free_gen', None) is not None:
-            # Pack 316-wire: cached generator fit via fit_free_fluency
-            # (induced POS + whole-template frames).
-            gen = self._free_gen
-        else:
-            ff = getattr(mr, '_frame_field_ref', None) or getattr(self, 'frame_field', None)
-            pool = (mr._role_targets.get('next', set())
-                    | mr._role_targets.get('next2', set())) & set(mr._cooccur_seen)
-            gen = FrameRelaxGenerator.from_frame_field(mr, ff, pool=pool or None,
-                                                       pmi=pmi)
-            if gen is None:
-                return None
-        toks = gen.generate(message=message, frame=frame, n_iters=n_iters,
-                            seed=seed)
-        return {'tokens': toks, 'text': ' '.join(str(t) for t in toks)}
-
     def fit_free_fluency(self, texts, K=None, pool_size=700, n_anchors=12,
                          pmi=True):
         """Pack 316-wire -- fit the free-fluency generator from training text.
@@ -1475,7 +2026,7 @@ class IkigaiOrganism:
 
     def ingest_triples(self, triples, discover=False, self_compress=False,
                        min_support=6, min_conf=0.7, fast=True,
-                       progress_every=0):
+                       progress_every=0, write_substrate=True):
         """Pack 326 + 328 -- ingest a stream of (subject, relation, object)
         triples from a knowledge graph (Wikidata / ConceptNet / a TSV dump) as
         atoms, via the cache, using the generic relation template so ANY
@@ -1489,9 +2040,40 @@ class IkigaiOrganism:
         the path for million-edge dumps. The anchor matches exactly what atom()
         reads (gr.tokenize of the same question), so the round-trip is identical.
 
+        Day-100 write_substrate=True -- THE ROOT FIX for a measured gap: this fast path wrote
+        ONLY the anchor-hash dict (`cat4.anchor_actions`), never the substrate's own searchable
+        index (`mr._role_targets['icl_pair'/'icl_state']`). MEASURED on the production organism:
+        a fact taught this way is answerable by an EXACT phrasing (dict hit) and by NOTHING else
+        -- a different phrasing of the identical question falls through to `recall_action`, whose
+        pool never received these facts, so it searches ~64K anchors of UNRELATED absorbed
+        dialogue and returns the nearest one by leftover FUNCTION-WORD overlap ('the mayor of
+        france is' and 'the capital of france is' returned the SAME top anchors at nearly the
+        same similarity -- the content word was drowned by four shared stopwords). That pool is
+        what `recall_action` searches; a fact absent from it cannot be found by real recall at any
+        cost, however long you let it run.
+
+        So every triple here ALSO gets the write absorb_chain performs: state_hv=focus_hv(question
+        tokens), action_hv=focus_hv(answer tokens), bound and stored under pair_role/state_role,
+        reusing the SAME tokens already computed for the dict write (no re-tokenizing). This makes
+        the dict a genuine fast-exact-match CACHE in front of a substrate that actually holds the
+        content, instead of the sole store. The lazy recall_action search cache is invalidated
+        ONCE at the end of the batch (not per-triple -- Day-95's dirty-flag convention), so a
+        rebuild picks up everything just ingested.
+
+        write_substrate=False restores the old dict-only behaviour for callers that need the raw
+        Pack-328 bulk-load speed and do not need substrate-searchable recall (e.g. an intentionally
+        throwaway or benchmark-only ingest).
+
         triples: iterable of (subject, relation, object) string triples.
         Returns {ingested, atoms_before, atoms_after, rules, compressed}.
         """
+        self._reach_dirty = True          # Day-95: new facts -> reach bank re-consolidates on next use
+        self._anc_dirty = True            # Day-96: new facts -> ancestor set-recall bank re-consolidates too
+        # Day-99: the LEARN epoch. Bumped only where knowledge actually ARRIVES, never on a read.
+        # Anything cached off "what the organism knows" (e.g. its curiosity gaps) stamps with this
+        # instead of len(triples) -- which grows on every successful atom() READ via _record and so
+        # invalidated caches on queries that taught nothing.
+        self._learn_epoch = int(getattr(self, '_learn_epoch', 0)) + 1
         eng = self.general_reasoner.derive_engine
         cat4 = self.cat4
         n = 0
@@ -1501,6 +2083,7 @@ class IkigaiOrganism:
             tok = self.general_reasoner.tokenize
             record = eng._record
             tmpl_cache = {}
+            _wrote_substrate = False
             if progress_every:
                 import sys as _sys, time as _time
                 _pt0 = _time.time()
@@ -1523,7 +2106,8 @@ class IkigaiOrganism:
                 if t is None:
                     t = eng._templates_for(r)[0]
                     tmpl_cache[r] = t
-                anchor = _stable_anchor(tok(t.format(e=s)))
+                q_toks = tok(t.format(e=s))
+                anchor = _stable_anchor(q_toks)
                 atoks = tuple(tok(o))
                 if not atoks:
                     continue
@@ -1536,8 +2120,32 @@ class IkigaiOrganism:
                         cache[anchor] = [atoks]
                     elif atoks not in ex:
                         ex.append(atoks)
+                if write_substrate and q_toks:
+                    # Day-100 ROOT FIX -- mirror absorb_chain's core write so this fact is
+                    # reachable by REAL substrate recall, not only an exact anchor-hash hit.
+                    # Same tokens already computed above; no re-tokenizing.
+                    import numpy as _np
+                    state_hv = cat4.focus_hv(list(q_toks))
+                    action_hv = cat4.focus_hv(list(atoks))
+                    bound = state_hv * action_hv
+                    bmag = float(_np.abs(bound).mean()) + 1e-12
+                    bound = (bound / bmag).astype(_np.complex64)
+                    cat4.mr.write_relation(anchor, cat4.pair_role, bound)
+                    cat4.mr._role_targets[cat4.pair_role].add(anchor)
+                    cat4.mr.write_relation(anchor, cat4.state_role,
+                                           state_hv.astype(_np.complex64))
+                    cat4.mr._role_targets[cat4.state_role].add(anchor)
+                    for _t in atoks:
+                        cat4.mr._role_targets[cat4.action_token_role].add(_t)
+                    _wrote_substrate = True
                 record(s, r, o)
                 n += 1
+            if _wrote_substrate:
+                # invalidate the lazy Pack-280 search cache ONCE per batch, not per triple --
+                # the same dirty-flag convention as _reach_dirty/_anc_dirty above.
+                cat4._pack280_recall_anchors = None
+                cat4._pack280_recall_states = None
+                cat4._pack280_recall_bounds = None
         else:
             for tri in triples:
                 if not tri or len(tri) < 3:
@@ -1565,11 +2173,31 @@ class IkigaiOrganism:
     def knows(self, entity, rels=None):
         """Pack 329 -- the full MULTI-VALUE meaning web of an entity: every
         relation -> ALL its stored values (richer than describe, which shows
-        one value each). Returns {relation: [values]}."""
+        one value each). Returns {relation: [values]}.
+
+        Day-100 -- IT VOLUNTEERS WHAT IT HOLDS, NOT WHAT IT HAPPENS TO HAVE TOUCHED.
+
+        This read its candidate relations off `eng.triples`, which is NOT the knowledge -- it is an
+        index populated lazily BY atom() hits. MEASURED on the production organism, cold:
+
+            (france,capital) in eng.triples = False      knows('france') -> {}
+            atoms('capital','france')       = ['paris']  <- the store held it all along
+
+        ...and after ANY probe touched it, the same call on the same organism returned
+        {'capital': ['paris']}. knows() was order-dependent: the organism could not volunteer a
+        fact until something had already asked for it. That is the chicken-and-egg Day-96 and
+        Day-99 both hit, and it was not confined to introspection -- `_fac_speak` scores its
+        confidence as the fraction of a topic's relations it can fill, THROUGH THIS CALL. So the
+        organism under-reported what it could say and `org(x)`'s faculty competition arbitrated on
+        a wrong number; `induce_surface` drove off it too and never saw most of its own knowledge.
+
+        The fix is to ASK, not to enumerate: probe the relation universe through atoms(), which is
+        the store's own index and needs no cache. Measured: 9 lookups x ~10 us = ~90 us, against
+        ~0.7 ms for the old full scan of eng.triples -- correct AND ~8x cheaper."""
         eng = self.general_reasoner.derive_engine
         ent = str(entity).strip().lower()
         if rels is None:
-            rels = sorted({r for (s, r) in eng.triples if s == ent})
+            rels = self.relation_universe()
         web = {}
         for r in rels:
             vals = eng.atoms(r, ent)
@@ -1674,13 +2302,6 @@ class IkigaiOrganism:
             self._branch_gen = None                       # rebuild at the new order
         return self.branch_gen.observe(sequences)
 
-    def generate_novel(self, start, steps=8, select=None, seed=0):
-        """Generate a NOVEL sequence by branching: at each step recover the valid
-        next-token set from the substrate and select one. Novel whole, valid steps.
-        Returns the generated token list."""
-        return self.branch_gen.generate(start, steps, select=select, seed=seed)
-
-    # ── Day 90: CONSOLIDATION -- hippocampal sequence store -> durable SDM ────
     def consolidate_generation(self):
         """Biology: during sleep the hippocampus REPLAYS its fast sequence traces into the
         slow cortical/cerebellar store, making them durable.  Here the transient generation
@@ -1810,7 +2431,7 @@ class IkigaiOrganism:
             tok = spec.strip().lower()
             def _c(c, _t=tok):
                 try:
-                    return self.flat.similarity(c, _t)
+                    return self.semantic_sim(c, _t)      # Day 91: live unified store
                 except Exception:
                     return None
             return _c
@@ -1819,7 +2440,7 @@ class IkigaiOrganism:
             vals = []
             for a in _a:
                 try:
-                    s = self.flat.similarity(c, a)
+                    s = self.semantic_sim(c, a)          # Day 91: live unified store
                 except Exception:
                     s = None
                 if s is not None:
@@ -1933,30 +2554,62 @@ class IkigaiOrganism:
                 'length': len(codes), 'vocab': ag.vocab_size}
 
     # ── Day 90: STRUCTURE-FIRST generation (Levelt frame-then-fill) ──────────
-    def generate_structured(self, seed, frame, type_vocab, theme=None):
-        """Day 90 -- STRUCTURE-FIRST generation, the biological (Levelt) mechanism: build a
+    def generate_structured(self, seed, frame, type_vocab, theme=None,
+                            constraints=None, meaning=True, ctx_window=4):
+        """Day 90/91 -- STRUCTURE-FIRST generation, the biological (Levelt) mechanism: build a
         FRAME first -- a sequence of slot TYPES, the syntactic/discourse scaffold -- then FILL
-        each slot with a word of the right type, chosen by meaning.  Unlike the flat walk
+        each slot with a word of the right type, chosen by MEANING.  Unlike the flat walk
         (which has no global structure and drifts off the pattern over length), the frame is a
         HARD, correct-by-construction constraint: an off-type word is NEVER emitted, so the
         output's structure is guaranteed.  Within a slot the filler is the grounded candidate
-        (a real observed transition) of the correct type that best resonates with the theme
-        (coherence).  Halts honestly if a slot has no grounded, type-correct filler -- it does
-        not fabricate a transition.
+        (a real observed transition) of the correct type that best fits the composed critics.
+        Halts honestly if a slot has no grounded, type-correct filler -- no fabrication.
+
+        Day 91 -- the FILL now composes a MEANING/GROUNDING critic (the missing piece the Day-90
+        reckoning named).  A structurally valid, theme-on sentence can still be locally
+        INCOHERENT: type and theme fix the scaffold and the global topic, but not that each
+        filler belongs with the WORDS ALREADY EMITTED.  The meaning critic is a DYNAMIC,
+        context-dependent critic (`meaning=True`, default): at each slot it scores a candidate
+        by its mean flat CO-OCCURRENCE resonance to the recent context (`ctx_window` tokens) --
+        distributional semantics (`flat.similarity`), a pure substrate op, never a topic label
+        or word list.  It is COMPOSED with the static critics (theme + any `constraints`) by
+        product-of-experts (the Day-89 machinery), so the pick satisfies structure AND theme AND
+        local meaning at once.  Where `flat` has no signal for a candidate the critic returns
+        None and composes NEUTRALLY -- so with an unpopulated co-occurrence memory the fill is
+        byte-identical to the Day-90 theme-only behaviour (the meaning critic is free to be on).
 
         This is lever B made structural, and it UNIFIES the depth loop with the generator: the
         frame is a PLAN (the planner can produce the slot-type sequence), and filling it is
-        constrained generation -- goal -> frame -> fill -> artifact, one loop.
+        composed constrained generation -- goal -> frame -> fill -> artifact, one loop.
 
         frame: list of slot type-ids (the scaffold).  type_vocab: {type_id: allowed words}.
-        theme: optional list of words -> a coherence critic (address resonance).
+        theme: optional list of words -> a static coherence critic (bundle resonance).
+        constraints: optional list of extra specs (see _make_critic), PoE-composed with theme.
+        meaning: compose the dynamic local co-occurrence critic (default True).
         Returns {sequence, types, length, frame_len, grounded, structural_valid}."""
-        crit = self.bundle_constraint(theme) if theme else None
+        static = []
+        if theme:
+            static.append(self.bundle_constraint(theme))
+        if constraints:
+            static.extend(self._make_critic(s) for s in constraints)
         vsets = {t: set(str(x).strip().lower() for x in ws) for t, ws in type_vocab.items()}
         start = str(seed).strip().lower()
         path, types = [start], [frame[0]]
         grounded = True
         ior = max(2, len(set(frame)))              # inhibition-of-return window (biology)
+
+        def _poe(c, ctx_crit):
+            """product-of-experts over the static critics + the dynamic meaning critic;
+            a None (no signal on an axis) composes neutrally (factor 1.0)."""
+            prod = 1.0
+            for cr in static:
+                s = cr(c)
+                prod *= 1.0 if s is None else max(1e-6, s + 1.0)
+            if ctx_crit is not None:
+                s = ctx_crit(c)
+                prod *= 1.0 if s is None else max(1e-6, s + 1.0)
+            return prod
+
         for t in frame[1:]:
             allowed = vsets.get(t, set())
             cands = [c for c in self.valid_next(path) if c in allowed]   # grounded AND typed
@@ -1964,11 +2617,14 @@ class IkigaiOrganism:
                 grounded = False
                 break                                                    # honest halt
             # inhibition of return: suppress recently-emitted fillers so slots vary (avoid
-            # the degenerate repeat of the single max-theme word), keeping alternatives only
+            # the degenerate repeat of the single max-fit word), keeping alternatives only
             recent = set(path[-ior:])
             pool = [c for c in cands if c not in recent] or cands
-            if crit is not None:
-                pick = max(pool, key=lambda c: (crit(c) if crit(c) is not None else -1.0))
+            # DYNAMIC meaning/grounding critic: cohere with the local context already emitted
+            # (mean flat co-occurrence resonance over the recent window) -- rebuilt per slot.
+            ctx_crit = self._make_critic(path[-ctx_window:]) if meaning else None
+            if static or ctx_crit is not None:
+                pick = max(pool, key=lambda c: _poe(c, ctx_crit))
             else:
                 pick = pool[0]
             path.append(pick); types.append(t)
@@ -1978,38 +2634,30 @@ class IkigaiOrganism:
                 'frame_len': len(frame), 'grounded': grounded,
                 'structural_valid': structural_valid}
 
-    # ── Day 90: THE UNIFIED GENERATION ENTRY ─────────────────────────────
-    def generate(self, seed=None, steps=40, *, text=None, frame=None, type_vocab=None,
-                 address_space=False, theme=None, constraints=None, combine='poe',
-                 veto=None, on_emit=None, sample=False, order=1, rng_seed=0):
-        """Day 90 -- ONE generation entry.  The generate_* family are all the SAME mechanism
-        (a grounded resonance walk + a selection rule); the parameters pick the mode and this
-        delegates to the proven implementation, so there is one public call to remember (the
-        way a transformer exposes one generate).  Modes:
-          * text given            -> FRAME-RELAX grammatical generation (returns {text});
-          * frame given           -> STRUCTURE-FIRST (Levelt frame-then-fill); needs type_vocab;
-          * address_space=True    -> ADDRESS-SPACE walk (integer codes, decode only at edges);
-          * theme / constraints    -> CONSTRAINED walk (theme or composed PoE critics, +veto/on_emit);
-          * none of the above     -> NOVEL grounded walk (maximal diversity).
-        Always returns a dict.  The former methods remain as the implementations + back-compat;
-        org.respond is the top understand->act entry that reaches this for a generation request."""
-        if text is not None:
-            return {'text': self.generate_frame(prompt=text, seed=rng_seed)}
-        if frame is not None:
-            return self.generate_structured(seed, frame, type_vocab or {}, theme=theme)
-        if address_space:
-            r = self.generate_addressed(seed, steps=steps, theme=theme, order=order,
-                                        seed=rng_seed)
-            return {'sequence': r['words'], 'codes': r['codes'], 'length': r['length'],
-                    'vocab': r['vocab'], 'grounded': True}
-        if theme is not None or constraints is not None:
-            cons = constraints if constraints is not None else [theme]
-            return self.generate_fluent(seed, steps=steps, constraints=cons, combine=combine,
-                                        veto=veto, on_emit=on_emit, sample=sample,
-                                        rng_seed=rng_seed)
-        seq = self.generate_novel(seed, steps=steps, seed=rng_seed)
-        return {'sequence': seq, 'grounded': True, 'length': len(seq)}
+    # ── Day 92: ORGANISM-TRUE generation -- realize MEANING through STRUCTURE, no next-token ──
+    @property
+    def frame_inducer(self):
+        """Day 92 -- unsupervised frame/type induction (Harris distributional): recover
+        syntactic TYPES from neighbour context and FRAMES from real type-sequences, so the
+        generator needs NO hand-authored template.  Reinforced by more data.  Lazy."""
+        fi = getattr(self, '_frame_inducer', None)
+        if fi is None:
+            from ikigai.cognition.frame_induction import FrameInducer
+            fi = FrameInducer(seed=92)
+            self._frame_inducer = fi
+        return fi
 
+    def induce_frames(self, sentences, k=6, min_count=2, top=None):
+        """Observe sentences, induce word TYPES (cluster by context) + a FRAME inventory
+        (frequent induced type-sequences).  Call repeatedly to REINFORCE.  Returns #frames."""
+        sents = [(_s.split() if isinstance(_s, str) else list(_s)) for _s in sentences]
+        fi = self.frame_inducer
+        fi.observe(sents)
+        fi.induce_types(k=k)
+        fi.induce_frames(sents, min_count=min_count, top=top)
+        return len(getattr(fi, 'frame_inventory', []))
+
+    # ── Day 92: FLUENT fill -- compose induced frame x pcseq x meaning, slot-by-slot ──
     def read_holo(self, text):
         """Read a passage into the holographic reader (every token recoverable
         from its context). Returns the number of writes."""
@@ -2035,6 +2683,186 @@ class IkigaiOrganism:
         Returns the extracted triples."""
         return self.holo_reader.comprehend(text, organism=self, min_rel_df=min_rel_df)
 
+    def _is_question(self, text):
+        """A telling states a fact; a query asks for one -- the organism must never LEARN from a
+        question.  It uses the interrogatives it LEARNED from the corpus (openers the corpus itself
+        marks with a trailing '?') plus the '?' punctuation.  Before it has read any language it
+        genuinely cannot tell, and returns False rather than pretend with an authored list."""
+        if not isinstance(text, str):
+            return False
+        t = text.strip().lower()
+        if t.endswith('?'):
+            return True
+        interr = getattr(self, '_interrogatives', None)
+        if not interr:
+            return False
+        first = t.split()[0] if t.split() else ''
+        return first in interr
+
+    def tell(self, text):
+        """Continual learning from what a human SAYS -- one fact or a whole paragraph.
+        comprehend() learns only by RECURRENCE (a relation must recur), so a single
+        told fact taught nothing.  tell() handles ANY input: each sentence is parsed
+        against the organism's own known relations (one-shot telling), and a multi-
+        sentence passage ALSO runs through comprehend() so relations that RECUR across
+        the passage are absorbed too.  Every candidate is learned through the real
+        body-modulated path (the 'learn' faculty -> learn_reinforced: dict cache +
+        substrate) and VERIFIED by reading it back -- so it reports learning ONLY what
+        it can now derive.  Returns {learned:[(s,r,o)...], text: summary|None}."""
+        import re as _re
+        if not isinstance(text, str) or not text.strip():
+            return {'learned': [], 'text': None}
+        eng = self.general_reasoner.derive_engine
+        rels = set(getattr(eng, 'relations', []) or [])
+        learned = []
+
+        def _norm(x):                               # to the substrate's own tokenization, so a
+            return ' '.join(_re.findall(r'[a-z0-9]+', str(x).lower()))   # hyphenated/punctuated
+                                                    # value from either extractor round-trips
+        def _absorb(a, r, o):
+            a, r, o = _norm(a), _norm(r), _norm(o)
+            if not (a and r and o) or (a, r, o) in learned:
+                return
+            self.be((a, r, o))                      # native learn faculty -> learn_reinforced
+            if (eng.atom(r, a) or eng.inherited_atom(r, a)) == o:   # only keep what verifies
+                learned.append((a, r, o))
+
+        sents = [s.strip() for s in _re.split(r'[.!?\n]+', text) if s.strip()]
+        for s in sents:                             # one-shot tellings, sentence by sentence
+            if self._is_question(s):                # a query is not a telling
+                continue
+            try:                                    # LEARNED surface frames -- what it read, no templates
+                ev = self.extract_verified(s)
+            except Exception:
+                ev = None
+            if isinstance(ev, (tuple, list)) and len(ev) == 3 and all(ev):
+                _absorb(*ev)
+        if len(sents) > 1:                          # recurrence over the whole passage
+            try:
+                for tri in (self.comprehend(text) or []):
+                    if len(tri) >= 3 and str(tri[1]).strip().lower() in rels:   # known relation only
+                        _absorb(tri[0], tri[1], tri[2])
+            except Exception:
+                pass
+
+        summary = '; '.join(f"the {r} of {a} is {o}" for a, r, o in learned[:5]) or None
+        return {'learned': learned, 'text': summary}
+
+    def learn_language(self, sentences=None, corpus='eng_sentences.tsv.bz2', n=500000):
+        """LEARN THE FORM OF LANGUAGE FROM EXPOSURE -- the biological path, not authored
+        templates.  Reads raw English sentences and induces its surface frames by
+        search-under-verification (`induce_surface_verified`: the corpus proposes forms, the
+        organism's OWN knowledge disposes -- no hand-authored patterns, no LLM judge).  After
+        this, `extract_verified()` parses a telling via the frames it LEARNED, and tell() /
+        _fac_learn prefer that over the template crutch (which shrinks toward dead as coverage
+        grows).  Pass `sentences`, or let it read `corpus` (Tatoeba .tsv[.bz2], first `n`).
+        Returns the verified-frame report."""
+        import os as _os, bz2 as _bz2
+        if sentences is None:
+            path = corpus if _os.path.isabs(corpus) else _os.path.join(
+                _os.path.dirname(_os.path.abspath(__file__)), corpus)
+            sentences = []
+            _open = _bz2.open if path.endswith('.bz2') else open
+            with _open(path, 'rt', encoding='utf-8') as f:
+                for line in f:
+                    p = line.split('\t')
+                    sentences.append((p[2] if len(p) >= 3 else p[-1]).strip())
+                    if len(sentences) >= n:
+                        break
+        sentences = list(sentences)
+        stats = self._induce_grammar_stats(sentences)      # function words + interrogatives (EMERGENT)
+        rep = self.induce_surface_verified(sentences)      # fact-grounded frames (distant supervision)
+        cur = self.curiosity_frames(sentences)             # curiosity + self-consistency (broad)
+        return {'grammar': stats, 'verified': rep,
+                'curiosity': {k: v['func'] for k, v in cur.items()}}
+
+    def _induce_grammar_stats(self, sentences):
+        """LEARN the closed-class grammar of the language FROM THE CORPUS -- no authored lists.
+        Function words EMERGE as the high-frequency head of the distribution (Zipf); INTERROGATIVES
+        emerge as the words that open sentences the corpus itself marks as questions (trailing
+        '?') far more than they open statements. Both are learned data, persisted with the
+        organism -- the same way it learns its relation frames. Returns a small summary."""
+        import collections as _c, re as _re
+        freq = _c.Counter(); q_open = _c.Counter(); s_open = _c.Counter()
+        for s in sentences:
+            s = str(s).strip().lower()
+            toks = _re.findall(r'[a-z0-9]+', s)
+            if not toks:
+                continue
+            freq.update(toks)
+            (q_open if s.endswith('?') else s_open)[toks[0]] += 1
+        # function words = the frequency head (closed class), learned not authored
+        self._function_words = set(w for w, _ in freq.most_common(50))
+        # interrogatives = openers that the corpus marks interrogative much more than declarative
+        interr = set()
+        for w, qc in q_open.items():
+            if qc >= 15 and qc > 2 * s_open.get(w, 0):
+                interr.add(w)
+        self._interrogatives = interr
+        return {'function_words': len(self._function_words),
+                'interrogatives': sorted(interr)[:20]}
+
+    def curiosity_frames(self, sentences, min_support=15, min_func=0.65, min_distinct=8,
+                         install=True):
+        """Curiosity-gated frame induction -- learns relation surface-frames from raw text with
+        NO pre-known facts, bypassing induce_surface_verified's known-fact wall (which could
+        only verify 'capital' because the organism knew ~13 capitals).
+
+        Curiosity PROPOSES: the genitive 'of' is a salient, recurrent, informative construction
+        ('the R of S is O' / 'O is the R of S', R a content word) -- the organism trusts it.
+        Consolidation DISPOSES: a candidate relation R survives only if what its frame extracts
+        is SELF-CONSISTENT -- a real relation is (mostly) FUNCTIONAL (each S -> one dominant O);
+        a coincidence extracts a contradictory scatter and is pruned.  The corpus verifies
+        ITSELF by coherence rather than against facts the organism already holds -- so it learns
+        relations (and far more capitals) than it knew.  install=True writes the surviving
+        frames into the surface realizer (both word orders).  Returns {R: {support, func,
+        distinct, frame}}."""
+        import re as _re, collections as _c
+        # function words are LEARNED (frequency head), not authored -- filter content vs closed-class
+        STOP = getattr(self, '_function_words', None) or set()
+        def _w(x):
+            return bool(x) and x.isalpha() and x not in STOP
+        pairs = _c.defaultdict(list)
+        supp = _c.Counter()
+        ra = _re.compile(r'\bthe (\w+) of (\w+) (?:is|was) (\w+)\b')       # the R of S is O
+        rb = _re.compile(r'\b(\w+) (?:is|was) the (\w+) of (\w+)\b')       # O is the R of S
+        for s in sentences:
+            s = str(s).lower()
+            for m in ra.finditer(s):
+                R, S, O = m.groups()
+                if _w(R) and _w(S) and _w(O):
+                    pairs[R].append((S, O)); supp[R] += 1
+            for m in rb.finditer(s):
+                O, R, S = m.groups()
+                if _w(R) and _w(S) and _w(O):
+                    pairs[R].append((S, O)); supp[R] += 1
+        out = {}
+        sf = getattr(self, 'surface', None)
+        for R, cnt in supp.items():
+            if cnt < min_support:
+                continue
+            by_s = _c.defaultdict(_c.Counter)
+            for s, o in pairs[R]:
+                by_s[s][o] += 1
+            if len(by_s) < min_distinct:
+                continue
+            func = sum(c.most_common(1)[0][1] / sum(c.values()) for c in by_s.values()) / len(by_s)
+            if func < min_func:
+                continue
+            frame = ['{O}', 'is', 'the', R, 'of', '{S}']
+            out[R] = {'support': cnt, 'func': round(func, 3), 'distinct': len(by_s), 'frame': frame}
+            if install and sf is not None:
+                for attr in ('templates', 'variants'):
+                    if getattr(sf, attr, None) is None:
+                        setattr(sf, attr, {})
+                sf.templates[R] = list(frame)
+                sf.variants.setdefault(R, [])
+                for fr in ([['{O}', 'is', 'the', R, 'of', '{S}'],
+                            ['the', R, 'of', '{S}', 'is', '{O}']]):
+                    if fr not in sf.variants[R]:
+                        sf.variants[R].append(list(fr))
+        return out
+
     def ask_derive(self, question, depth=None):
         """Answer a plain-English question through the SEMANTIC derive engine
         (not the episodic holo store). Depth is EMERGENT by default: the question
@@ -2053,6 +2881,33 @@ class IkigaiOrganism:
                 question, eng.relations, eng.entities)
             if not (ent and mentions):
                 ent, mentions = self.holo_reader.parse_chain(question)
+            # Day-99 -- ASK THE SUBSTRATE WHICH TOKEN IS THE ENTITY, don't ask a stale index.
+            #
+            # Both parsers identify the entity by membership in `eng.entities` -- but that set is
+            # POPULATED BY successful atom() hits, so on a freshly loaded organism it does not yet
+            # contain the very entity being asked about. Deadlock: the parser needs `france` in
+            # entities to find it; entities only gains `france` once atom() resolves it; atom() is
+            # only called once the parser has found it.
+            #
+            # MEASURED on production (193 MB, vocab 6,808):
+            #   'france' in eng.entities            -> False
+            #   parse -> ent='what the'  (it fell back to "longest arg run joined")
+            #   ask_derive -> None  ->  answer() -> "i don't know"   ... while atom('capital',
+            #   'france') returned 'paris' the whole time. The organism knew Paris and refused to
+            #   say Paris. One atom() hit seeded `entities` and everything worked immediately.
+            # No gate caught this because full_capability calls gr.reason() DIRECTLY, bypassing
+            # answer() -- capitals 20/21 green all day over a door that was shut.
+            #
+            # The entity is simply WHAT THE RELATION APPLIES TO. The substrate can answer that in
+            # O(1) per candidate, needs no index, and cannot go stale.
+            if mentions:
+                _r0 = mentions[-1]
+                if not ent or not (eng.atom(_r0, ent) or eng.inherited_atom(_r0, ent)):
+                    for _c in self.general_reasoner.tokenize(question):
+                        if _c and _c not in mentions and (eng.atom(_r0, _c)
+                                                          or eng.inherited_atom(_r0, _c)):
+                            ent = _c
+                            break
             if not (ent and mentions):
                 return None, ent, mentions
             cur = ent
@@ -2119,6 +2974,15 @@ class IkigaiOrganism:
             because = ' ; '.join(steps)
             allowed = set(tok(' '.join(vocab)))
             grounded = all(t in allowed for t in tok(text + ' ' + because))
+            # Day-98 NO-HALLUCINATION THEOREM -- ENFORCED, not merely reported.  Emission is GATED
+            # on (verified AND grounded): every content token of the answer and its 'because' must
+            # appear in the INDEPENDENTLY re-derived proof-chain vocab.  If a single token is not
+            # traceable to a re-derived fact, the organism ABSTAINS rather than emit it.  This is
+            # the whole theorem: there is no code path that returns emitted text with grounded=False,
+            # so an unverified/ungrounded token CANNOT be emitted -- by construction, not by training.
+            if not grounded:
+                return {'text': "i don't know", 'grounded': True, 'fact': None,
+                        'verified': False, 'because': None}
             return {'text': text, 'grounded': grounded, 'fact': (ent, rel, ans),
                     'verified': True, 'because': because, 'proof': p.get('proof')}
         ans, ent, rels = self.ask_derive(question, depth=depth)
@@ -2430,70 +3294,970 @@ class IkigaiOrganism:
         frame (function words) is induced; content always comes from the fact."""
         return self.surface.learn(pairs)
 
-    def narrate(self, entity, max_facts=8, fluent=False):
-        """Day-87 FUSION -- REASON then SPEAK: not a recall engine.  The organism
-        DERIVES what it can about an entity -- its class chain by transitive reach,
-        its inherited attributes -- most of which were NEVER stored, then GENERATES a
-        coherent multi-fact description of them.  The narrative as a whole is novel
-        (never stored); every content token is grounded in a DERIVED fact (it cannot
-        say what it did not derive); it abstains when it knows nothing.  This fuses
-        reasoning (derivation) with generation (composition) under the cannot-lie law.
-        Returns {entity, sentences, narrative, facts, n_derived, grounded}."""
-        eng = self.general_reasoner.derive_engine
-        ent = str(entity).strip().lower()
-        facts, seen = [], set()
+    def extract(self, sentence):
+        """EXTRACTION = INVERSE GENERATION: read a sentence back into grounded triple(s)
+        by aligning it to the organism's own INDUCED surface frames (the same frames that
+        generate).  text -> structure the organism can DERIVE over -- the 'meaning from
+        data' door.  Returns a list of (s, r, o).  No authored rules, no backprop."""
+        return self.surface.extract(sentence)
 
-        def add(s, r, o, derived):
-            k = (s, r, o)
-            if o and k not in seen:
-                seen.add(k); facts.append({'s': s, 'r': r, 'o': o, 'derived': derived})
+    def extract_verified(self, sentence, thresh=0.8, return_score=False):
+        """EXTRACTION under SEARCH-UNDER-VERIFICATION (the #8 mechanism on real work):
+        propose candidate parses leniently, then VERIFY each by regenerating the sentence
+        and keeping the one that reconstructs the source -- generation is the verifier for
+        extraction.  Abstains (None) if nothing reconstructs above `thresh`.  This is what
+        makes inverse-generation robust on messy REAL English without fabricating."""
+        return self.surface.extract_verified(sentence, thresh=thresh, return_score=return_score)
 
-        # 1. class chain by transitive reach: the DIRECT parent is stored, every
-        #    ancestor BEYOND it is DERIVED (never stored) -- the reasoning.
-        for link in sorted(r for r in eng.relations if eng.is_transitive(r)):
-            chain = eng.transitive_reach(link, ent) or []
-            for i, anc in enumerate(chain[1:], start=1):
-                add(ent, link, anc, derived=(i > 1))
-        # 2. inherited attributes: derived by climbing, not stored on the entity.
-        for rule in eng.learned_rules:
-            if rule.get('type') == 'inheritance':
-                attr = rule.get('attr')
-                if attr and attr != '*' and not eng.atom(attr, ent):
-                    v = eng.inherited_atom(attr, ent)
-                    if v:
-                        add(ent, attr, v, derived=True)
-        # 3. direct attributes the entity carries itself (stored).
-        for r in sorted(eng.relations):
-            if not eng.is_transitive(r):
-                v = eng.atom(r, ent)
-                if v:
-                    add(ent, r, v, derived=False)
-
-        facts = facts[:max_facts]
-        # GENERATE: one sentence per fact, composed stored-first then derived.  Default
-        # surface = the relation's OWN token ('wug isa florp', nothing hardcoded); with
-        # fluent=True, a MINED, content-blind frame realises it ('a wug is a florp') --
-        # the frame is function words only, so CONTENT stays grounded in the fact.
-        facts.sort(key=lambda f: f['derived'])
-        tok = self.general_reasoner.tokenize
-        sentences, content = [], []
-        for f in facts:
-            if fluent:
-                sentences.append(self.surface.realize(f['s'], f['r'], f['o']))
+    def extract_to_mem(self, sentences, discover=False, verified=False, thresh=0.8):
+        """Read raw sentences into grounded triples and TEACH them to the unified memory,
+        so a pile of text becomes structure the organism reasons over.  verified=True runs
+        each sentence through search-under-verification (robust on real text).  Returns
+        the triples ingested."""
+        triples = []
+        for sent in sentences:
+            if verified:
+                t = self.extract_verified(sent, thresh=thresh)
+                if t is not None:
+                    triples.append(t)
             else:
-                sentences.append(f"{f['s']} {f['r']} {f['o']}")
-            content += [f['s'], f['o']]                 # content tokens that MUST ground
-        narrative = ' . '.join(sentences)
-        allowed = set(tok(' '.join(content)))
-        # grounding: every CONTENT token of each fact appears; the fluent frame adds
-        # only function words (content-blind), so it cannot state an underived fact.
-        grounded = all(c in allowed for c in tok(' '.join(content))) if narrative else True
-        if not sentences:
-            return {'entity': ent, 'sentences': [], 'narrative': "i don't know " + ent,
-                    'facts': [], 'n_derived': 0, 'grounded': True}
-        return {'entity': ent, 'sentences': sentences, 'narrative': narrative,
-                'facts': facts, 'n_derived': sum(f['derived'] for f in facts),
-                'grounded': grounded}
+                triples.extend(self.extract(sent))
+        if triples:
+            self.mem.teach(triples, discover=discover)
+        return triples
+
+    def induce_surface(self, sentences, max_pairs=400):
+        """Day-99 -- LEARN THE FORM OF LANGUAGE FROM ITS OWN KNOWLEDGE (distant supervision).
+
+        The blocker this removes: text -> fact extraction needed `learn_surface(pairs)`, and those
+        ((s,r,o), sentence) pairs were HAND-AUTHORED -- the crutch the anti-cheat constitution bans
+        ("INDUCED frames, not hand-fed"). Meanwhile `induce_frames` (Harris/Schutze) runs, induces
+        frames, and the extractor never sees them: MEASURED, induce_frames -> 2 frames, and
+        extract_verified still returned (None, 0.0). Two faculties that both work and never speak.
+
+        Why that gap is real and not a wiring oversight: unsupervised induction can discover that
+        `DET X COP DET Y` is a frequent pattern, but NOTHING in the distribution says the pattern
+        MEANS `isa`. Form is inducible; the form->meaning link needs grounding.
+
+        The organism already holds the grounding -- its own facts. So: read raw sentences, and
+        wherever a sentence contains two entities it ALREADY knows to be related, it has found a
+        sentence expressing a relation it understands, and can induce that surface frame from it.
+        The pairs are DERIVED from (corpus x its own knowledge), never authored. This is distant
+        supervision, and it is how the form of language gets learned from having something to say.
+
+        Seed knowledge -> read text -> induce frames -> extract NEW facts from NEW text. That loop
+        is what "feed it data and it learns" requires to be honest rather than staged.
+
+        Returns the number of (fact, sentence) alignments it found and learned from."""
+        tok = self.general_reasoner.tokenize
+        pairs, seen = [], set()
+        for sent in sentences:
+            s = str(sent)
+            toks = [t for t in tok(s) if t]
+            if len(toks) < 2:
+                continue
+            uniq = list(dict.fromkeys(toks))
+            for a in uniq:
+                try:
+                    web = self.knows(a) or {}
+                except Exception:
+                    continue
+                for rel, vals in web.items():
+                    for v in (vals or []):
+                        vn = str(v).replace(' ', '').strip().lower()
+                        if not vn or vn == a:
+                            continue
+                        if vn in uniq:                       # both ends present -> the sentence
+                            k = (a, rel, vn, s)              # EXPRESSES a relation it understands
+                            if k not in seen:
+                                seen.add(k)
+                                pairs.append(((a, rel, vn), s))
+                        if len(pairs) >= max_pairs:
+                            break
+        if pairs:
+            self.learn_surface(pairs)
+        return len(pairs)
+
+    def relation_universe(self):
+        """Every relation the organism can be ASKED about. Derived, not authored: the composition
+        engine's own question templates, plus any relation its enumerable atom index has seen.
+
+        Why this is needed at all: the organism's facts live in cat4's anchor cache, keyed by a HASH
+        of the tokenized question -- a one-way key. You cannot enumerate what it knows; you can only
+        ask questions you already know to ask. `eng.triples` is the enumerable INDEX, and it is
+        populated lazily BY atom() hits, so it shows only what has already been touched. Measured
+        Day-100: a freshly loaded organism reports 5 relations via the index while actually holding
+        at least 8 (currency/language/population answered fine -- nothing had touched them).
+
+        Stamped with `_learn_epoch`, not len(eng.triples): the index GROWS on every read (atom()
+        records what it resolves), so a length stamp would go stale on reads and force a rescan
+        every call -- the Day-99 curiosity bug exactly. A relation can only reach the index after
+        something INGESTED it, and ingest bumps the epoch, so the epoch is the honest stamp."""
+        ep = getattr(self, '_learn_epoch', 0)
+        cu = getattr(self, '_rel_universe_cache', None)
+        if cu is not None and cu[0] == ep:
+            return cu[1]
+        from ikigai.cognition.compositional import _REL_TEMPLATES
+        eng = self.general_reasoner.derive_engine
+        rels = sorted(set(_REL_TEMPLATES) | {r for (_s, r) in eng.triples})
+        self._rel_universe_cache = (ep, rels)
+        return rels
+
+    @staticmethod
+    def _frame_regex(frame):
+        """An induced frame -> a matcher. Slots capture a short word-run; the frame's own literal
+        tokens are the anchors that bound them.
+
+        Day-100 -- A FRAME-INITIAL SLOT MUST BE ANCHORED TO THE SENTENCE START.
+
+        Day-99 learned this once and it generalises: a leading function word is not decoration, it
+        is the LEFT ANCHOR that bounds the slot. When the frame ITSELF begins with a slot there is
+        no such anchor, and the slot eats leftward into whatever precedes it. Measured on
+        '{O} is spoken in {S}' over the 87 Tatoeba sentences carrying that form:
+
+            unanchored : 'What language is spoken in Mexico?'      -> language(mexico)='what language'
+                         "John didn't know Tupi is spoken in Brazil." -> language(brazil)='t know tupi'
+            anchored   : the clause has to START where the frame starts
+
+        Slots stay up to 3 words. A 1-word slot scores higher (0.86 vs 0.75) and cannot say
+        'papua new guinea' or 'santo domingo' -- capital learns both correctly, so the cheaper
+        precision is the wrong trade."""
+        import re as _re
+        parts = []
+        for t in frame:
+            if t == '{S}':
+                parts.append(r'(?P<S>[a-z]+(?: [a-z]+){0,2})')
+            elif t == '{O}':
+                parts.append(r'(?P<O>[a-z]+(?: [a-z]+){0,2})')
+            else:
+                parts.append(_re.escape(t))
+        lead = r'^' if frame and frame[0] in ('{S}', '{O}') else r'\b'
+        return _re.compile(lead + r'\s+'.join(parts) + r'\b')
+
+    @staticmethod
+    def _is_assertion(sentence):
+        """Day-100 -- A QUESTION IS NOT EVIDENCE OF ITS ANSWER.
+
+        Distant supervision reads a sentence as expressing a fact the organism holds. A question
+        expresses the fact's SHAPE and withholds its value -- and 'what language is spoken in {e}'
+        is literally the organism's OWN question template for that relation (_REL_TEMPLATES). So
+        the corpus was teaching it to answer its own questions with the word 'what'.
+
+        MEASURED on '{O} is spoken in {S}': 6 of 10 conflicts were questions. Dropping them takes
+        precision 0.38 -> 0.67, and with the slot anchored, 0.75 -- the difference between the
+        organism learning that frame and rejecting it. Punctuation, not an authored word list."""
+        return '?' not in str(sentence)
+
+    @staticmethod
+    def _frame_anchor(frame):
+        """The frame's longest literal run -- a cheap substring prefilter before the regex."""
+        runs, cur = [], []
+        for t in frame:
+            if t in ('{S}', '{O}'):
+                if cur:
+                    runs.append(' '.join(cur)); cur = []
+            else:
+                cur.append(t)
+        if cur:
+            runs.append(' '.join(cur))
+        return max(runs, key=len) if runs else ''
+
+    def induce_surface_verified(self, sentences, min_agree=2, min_prec=0.5, max_frame_tokens=10,
+                                install=True):
+        """Day-100 -- INDUCE THE FORM OF LANGUAGE, AND VERIFY IT AGAINST WHAT YOU ALREADY KNOW.
+
+        `induce_surface` (Day-99) aligned the organism's facts to raw text and handed every
+        alignment to `learn_surface`, which majority-votes over sentences. MEASURED on the full
+        2,030,118-sentence Tatoeba corpus, that is not merely weak -- it is inverted:
+
+            capital: current learn() picks   'george {O} was the {S}'        (4 sentences)
+                     the true frame          '{O} is the capital of {S}'     (1 sentence)
+
+        The noise wins because Tatoeba DUPLICATES 'George Washington was the first President of the
+        United States' across translation sets, so ONE junk fact (the organism holds a garbage
+        capital:first->washington) rides 4 identical sentences, while the real frame appears once --
+        the organism knows ~13 capitals and the corpus's 316 'is the capital of' sentences are
+        mostly about other countries. Counting DISTINCT FACTS instead of sentences does not help:
+        measured, every frame has fact-support exactly 1. Support at induction time cannot see the
+        difference, because at induction time there IS no difference.
+
+        The difference appears when you USE the frame. A real surface form is PRODUCTIVE -- apply it
+        back to the corpus and it extracts hundreds of pairs; a coincidence extracts its own sentence
+        and stops. But productivity alone is pure RECALL, and measured it crowns the most GENERIC
+        frame: 'the {S} {O}' extracts 249,071 pairs because it is just two adjacent words.
+
+        So the corpus proposes and the organism's OWN KNOWLEDGE disposes -- search-under-verification,
+        the #8 mechanism, with no authored templates and no LLM judge:
+
+            productivity  apply the frame to the corpus      -> the (S,O) pairs it extracts
+            verification  over pairs where the organism HAS a belief:
+                            agree    = it already holds (S,rel,O)
+                            conflict = it holds (S,rel,X), X != O
+                          precision = agree / (agree + conflict)
+            keep          agree >= min_agree and precision >= min_prec
+            harvest       the pairs it had NO belief about are what reading TAUGHT it
+
+        Measured on the full corpus, from an organism holding ~13 capitals:
+            capital  'the capital of {S} is {O}'   37 agree, precision 0.74, 120 facts it never knew
+                     (aruba->oranjestad, burundi->gitega, kazakhstan->astana, ...  all correct)
+        and the junk is rejected on its own numbers ('george {O} was the {S}' -> precision 0.38).
+
+        HONEST, and reported rather than papered over: continent/currency/isa/subclassof/language
+        survive nothing on this corpus. '{O} is spoken in {S}' is a REAL frame and still scores 0.38
+        because the slot capture takes 'many countries' out of 'English is spoken in many countries'.
+        Precision is 0.74, not 1.0: 'haiti'->'port' is a truncated 'port-au-prince'. Reading a
+        conversational corpus does not teach an encyclopedia, and this says so with numbers.
+
+        Returns {rel: {...}} per relation -- either the kept frame with its measured evidence, or
+        why nothing survived. install=True writes the survivors into the surface realizer."""
+        eng = self.general_reasoner.derive_engine
+        tok = self.general_reasoner.tokenize
+        rels = self.relation_universe()
+
+        # Only ASSERTIONS are evidence. A question states the relation's shape and withholds its
+        # value; read as evidence it teaches the organism to answer 'what'. (see _is_assertion)
+        corpus = [str(s).lower() for s in sentences if self._is_assertion(s)]
+        memo, vtok = {}, {}
+
+        def probe(a):
+            r = memo.get(a)
+            if r is None:
+                r = [(rel, v) for rel in rels for v in (eng.atoms(rel, a) or [])]
+                memo[a] = r
+            return r
+
+        def span(toks, vt):
+            n, m = len(toks), len(vt)
+            for i in range(n - m + 1):
+                if toks[i:i + m] == vt:
+                    return i
+            return -1
+
+        # ---- propose: distant supervision over (corpus x its own knowledge) -------------------
+        from collections import Counter as _C, defaultdict as _dd
+        cand = _dd(_C)
+        for low in corpus:
+            lw = low.split()
+            toks = [t for t in tok(low) if t]
+            if len(toks) < 3:
+                continue
+            for a in dict.fromkeys(toks):
+                for rel, v in probe(a):
+                    vt = vtok.get(v)
+                    if vt is None:
+                        vt = [t for t in tok(str(v)) if t]
+                        vtok[v] = vt
+                    if not vt or vt == [a]:
+                        continue
+                    j = span(lw, vt)
+                    i = span(lw, [a])
+                    if j < 0 or i < 0:
+                        continue
+                    fr, k = [], 0
+                    while k < len(lw):
+                        if k == j:
+                            fr.append('{O}'); k += len(vt); continue
+                        if k == i:
+                            fr.append('{S}'); k += 1; continue
+                        fr.append(lw[k]); k += 1
+                    if '{S}' in fr and '{O}' in fr:
+                        idx = [q for q, t in enumerate(fr) if t in ('{S}', '{O}')]
+                        cand[rel][tuple(fr[:max(idx) + 1])] += 1
+
+        # ---- dispose: the organism's own knowledge scores every candidate ---------------------
+        report = {}
+        for rel in rels:
+            scored = []
+            for f in [f for f in cand[rel] if len(f) <= max_frame_tokens]:
+                anchor = self._frame_anchor(f)
+                if not anchor:
+                    continue
+                rx = self._frame_regex(f)
+                pairs = set()
+                for s in corpus:
+                    if anchor not in s:
+                        continue
+                    m = rx.search(s)
+                    if m:
+                        pairs.add((m.group('S'), m.group('O')))
+                agree = conflict = 0
+                new = []
+                for (S, O) in pairs:
+                    held = eng.atoms(rel, S) or []
+                    if not held:
+                        new.append((S, O))
+                    elif O in held:
+                        agree += 1
+                    else:
+                        conflict += 1
+                prec = agree / max(1, agree + conflict)
+                scored.append({'frame': list(f), 'agree': agree, 'conflict': conflict,
+                               'precision': round(prec, 3), 'pairs': len(pairs), 'new': new})
+            ok = [x for x in scored
+                  if x['agree'] >= min_agree and x['precision'] >= min_prec]
+            ok.sort(key=lambda x: (-x['precision'], -x['pairs']))
+            if ok:
+                best = dict(ok[0])
+                best['variants'] = [x['frame'] for x in ok]
+                report[rel] = best
+            else:
+                bp = max((x['precision'] for x in scored), default=0.0)
+                report[rel] = {'frame': None, 'candidates': len(cand[rel]),
+                               'best_precision': round(bp, 3),
+                               'reason': f'no frame induced for {rel}: {len(cand[rel])} candidates, '
+                                         f'best precision {bp:.2f} (needs agree>={min_agree}, '
+                                         f'prec>={min_prec})'}
+
+        # ---- conflation guard: two relations must not own the SAME surface form ---------------
+        # Measured Day-100: `capital` keeps 'the capital of {S} is {O}' (prec 0.74) and `country`
+        # keeps 'the capital of {O} is {S}' (prec 0.78) -- the SAME skeleton with the slots swapped.
+        # country's frame verifies ONLY because every country fact this organism happens to hold is
+        # about a CAPITAL city. Realise country(marseille)=france through it and it says "the capital
+        # of france is marseille" -- false. The content tokens are still grounded and the FRAME lies
+        # anyway: exactly the frame-level hole Day-98's Wall C left open. Distant supervision
+        # conflates a relation with a correlated sub-relation whenever the seed facts are biased,
+        # and precision cannot see it -- the organism holds no counterexample to be wrong about.
+        #
+        # The tiebreak is the organism's OWN symbol for the relation, not an authored rule: when two
+        # relations claim the same literal skeleton, the one whose NAME is among those literals owns
+        # it. Narrow by construction -- it fires only on a collision, and it is honest when it fires.
+        skels = {}
+        for rel, r in report.items():
+            f = r.get('frame')
+            if f:
+                skel = tuple(sorted(t for t in f if t not in ('{S}', '{O}')))
+                skels.setdefault(skel, []).append(rel)
+        for skel, claim in skels.items():
+            if len(claim) < 2:
+                continue
+            named = [r for r in claim if r in skel]
+            keep = named[0] if named else max(claim, key=lambda r: report[r]['precision'])
+            for r in claim:
+                if r == keep:
+                    continue
+                report[r] = {'frame': None, 'candidates': len(cand[r]),
+                             'best_precision': report[r]['precision'],
+                             'reason': f"no frame induced for {r}: its best frame is the surface "
+                                       f"form `{' '.join(report[keep]['frame'])}` that `{keep}` "
+                                       f"owns -- borrowed from a correlated relation, not its own"}
+
+        if install:
+            for rel, r in report.items():
+                if r.get('frame'):
+                    self.surface.templates[rel] = list(r['frame'])
+                    self.surface.variants[rel] = [list(v) for v in
+                                                  (r.get('variants') or [r['frame']])]
+        return report
+
+    def read_verified(self, sentences, learn=True, min_agree=2, min_prec=0.5):
+        """Day-100 -- FEED RAW TEXT, COME OUT KNOWING FACTS NOBODY TAUGHT YOU.
+
+        induce_surface_verified() -> the frames that survived the organism's own verification ->
+        harvest the pairs it had NO belief about -> learn them (body-modulated reinforcement).
+
+        This is the honest form of 'feed it data and it learns': every frame is INDUCED and then
+        VERIFIED against knowledge the organism already had, and only what the verified frame
+        extracts is taught. Relations whose frames did not survive teach nothing, and say so.
+
+        Returns {frames: {...}, learned: n, facts: [...]}."""
+        rep = self.induce_surface_verified(sentences, min_agree=min_agree, min_prec=min_prec)
+        facts, learned = [], 0
+        for rel, r in rep.items():
+            if not r.get('frame'):
+                continue
+            for (S, O) in r.get('new', []):
+                if self.prediction_error(S, rel, O) > 0.0:
+                    if learn:
+                        self.learn_reinforced(S, rel, O)
+                    learned += 1
+                    facts.append((S, rel, O))
+        return {'frames': rep, 'learned': learned, 'facts': facts}
+
+    def read(self, sentences, rounds=1, discover=True, min_support=2, min_conf=0.5):
+        """Day-99 -- READ: the organism reads raw text and comes out knowing more.
+
+        The honest bootstrap, in the biological order -- you acquire the form of language from
+        text you can already ground, and only then can you learn NEW facts by reading:
+
+            induce_frames    distributional word types + frame inventory (Harris/Schutze)
+            induce_surface   align its OWN knowledge to the text -> learn the surface frames
+            extract_corpus   now extract triples from sentences, with the verify gate
+            learn            land them (body-modulated reinforcement, visible to every door)
+            discover         mine rules over what it now holds
+
+        Iterating helps and is not a trick: each round it knows more, so more sentences contain a
+        relation it recognises, so it induces more frames, so it extracts more. Bootstrapping.
+
+        Returns {frames, alignments, edges, learned, rules}."""
+        sents = [str(s) for s in sentences if str(s).strip()]
+        out = {'frames': 0, 'alignments': 0, 'edges': 0, 'learned': 0, 'rules': 0, 'verified': {}}
+        # Day-102: FEED THE 5 GROUNDING CHANNELS. This bootstrap induces frames and
+        # learns triples, but until now it skipped distributional grounding entirely
+        # (grammar/POS, sensory, taxonomy) -- the ground_text() feeder was shadowed
+        # dead, so grammar.vocab_size stayed 0 and the organism had no part-of-speech
+        # foundation for fluent generation. Grounding each sentence here is where
+        # language FORM is acquired (the docstring's own "acquire the form of language
+        # from text you can already ground"). Best-effort, never raises into learning.
+        for s in sents:
+            try:
+                self.ground_text(s)
+            except Exception:
+                pass
+        for _ in range(max(1, int(rounds))):
+            try:
+                out['frames'] = self.induce_frames(sents, k=4, min_count=2) or 0
+            except Exception:
+                pass
+            # Day-100 -- VERIFY FIRST. A frame the organism's own knowledge confirms beats a frame
+            # that merely repeated: measured on 2.03M raw Tatoeba sentences, the unverified path
+            # installs 'george {O} was the {S}' for `capital` (one junk fact riding 4 duplicate
+            # sentences) while verification installs 'the capital of {S} is {O}' (37 agree, 0.74).
+            #
+            # The fallback is decided by the RESULT, not by a size threshold: verification needs
+            # facts it already holds to check a frame against, and a 13-sentence bootstrap corpus
+            # cannot reach that. So if verification could confirm NOTHING, the Day-99 alignment path
+            # still runs -- that is exactly the small-seed case it was built for. Verification only
+            # ever REPLACES a frame with one that was checked.
+            try:
+                out['verified'] = self.induce_surface_verified(sents) or {}
+            except Exception:
+                out['verified'] = {}
+            if not any(v.get('frame') for v in out['verified'].values()):
+                out['alignments'] = self.induce_surface(sents)
+            edges = self.extract_corpus(sents)
+            out['edges'] = len(edges)
+            for (s, r, o) in edges:
+                if self.prediction_error(s, r, o) > 0.0:      # only what it does not already hold
+                    self.learn_reinforced(s, r, o)
+                    out['learned'] += 1
+        if discover:
+            try:
+                out['rules'] = len(self.general_reasoner.derive_engine.discover(
+                    min_support=min_support, min_conf=min_conf) or [])
+            except Exception:
+                pass
+        return out
+
+    def extract_corpus(self, sentences, top_function_words=120, verified=True, thresh=0.7,
+                       head_noun=True, to_mem=False, discover=False):
+        """Day-94 #8 -- RAW TEXT -> GROUNDED KG AT SCALE, native.  Read a pile of raw sentences
+        into a grounded taxonomy using the organism's INDUCED frames + the verify gate, refined by
+        a DATA-DERIVED informativeness filter: the corpus's own most frequent tokens are the
+        function words (pronouns/copula), so a triple whose subject or object-HEAD is one of them
+        is dropped -- no authored stoplist.  head_noun=True takes the object NP's head (last token,
+        English is head-final) as the class, so 'a beautiful country' -> 'country' (recurs, closes).
+        Returns the de-duplicated (s, r, o) edges; to_mem=True also teaches them.  Learn frames
+        first with learn_surface().  (Cuts idiom noise ~61%->~1% vs raw extraction; 0 fabrication.)"""
+        import re as _re
+        from collections import Counter as _Counter
+        freq = _Counter()
+        sents = []
+        for s in sentences:
+            toks = _re.findall(r"[a-z]+", str(s).lower())
+            if toks:
+                freq.update(toks); sents.append(str(s))
+        # Day-99 -- the function words are the organism's OWN INDUCED FRAMES, not a frequency guess.
+        #
+        # `surface.templates` is {'isa': ['a', '{S}', 'is', 'a', '{O}']}: the LITERAL tokens of an
+        # induced frame ARE the function words ('a', 'is'), and the slots are where content goes.
+        # The organism induced that itself, from text it could ground -- so this is data-derived in
+        # fact, not just in spirit, and it needs no authored stoplist.
+        #
+        # The frequency heuristic it replaces was wrong twice over. It took an ABSOLUTE 120, so on
+        # a corpus whose vocabulary is smaller than 120 EVERY content word became a "function word"
+        # and every triple was dropped (measured: 6 sentences, vocab 10 -> 0 edges, while
+        # extract_verified was correctly returning ('feline','isa','mammal')). And frequency itself
+        # is the wrong signal for a taxonomy: `mammal` and `animal` are FREQUENT because they are
+        # the ROOT, so the filter silently ate the most general facts in the corpus -- it learned 4
+        # of 11 edges and dropped feline->mammal, mammal->animal. Zipf holds for English function
+        # words; it does not hold for the top of a taxonomy. A frame literal cannot make that
+        # mistake: `mammal` never appears as a literal in a template.
+        stop = set()
+        for _toks in (getattr(self.surface, 'templates', None) or {}).values():
+            for _t in _toks:
+                _t = str(_t)
+                if not (_t.startswith('{') and _t.endswith('}')):
+                    stop.add(_t.strip().lower())
+        if not stop:            # no frames induced yet -> fall back to the frequency heuristic,
+            _k = min(int(top_function_words), max(1, len(freq) // 4))   # capped to a quarter of
+            stop = {w for w, _ in freq.most_common(_k)}                 # the vocabulary (Zipf)
+        edges, seen = [], set()
+        for sent in sents:
+            tri = self.extract_verified(sent, thresh=thresh) if verified else \
+                (self.extract(sent)[:1] or [None])[0]
+            if not tri:
+                continue
+            s, r, o = tri
+            if head_noun:
+                ot = str(o).rstrip('.').split()
+                o = ot[-1] if ot else o
+            s = str(s).strip(); o = str(o).strip()
+            if not s or not o or s in stop or o in stop:       # data-derived informativeness filter
+                continue
+            k = (s, r, o)
+            if k not in seen:
+                seen.add(k); edges.append((s, r, o))
+        if to_mem and edges:
+            self.mem.teach(edges, discover=discover)
+        return edges
+
+    def scene(self, objects=None, d=1024, scale=6.0):
+        """Day-94 -- a SPATIAL SCENE on the substrate (Spatial Semantic Pointers), native.  The same
+        FHRR substrate that holds taxonomy holds continuous 2-D position: sc.add(name,x,y);
+        sc.where(name) decodes position by resonance; sc.nearest(x,y) finds the closest by SSP
+        similarity (no coordinates compared); sc.base_facts() feeds the SAME derive engine, which
+        then composes spatial relations (right-of / above / between) exactly as it composes is-a.
+        The organism generalizes off the text axis with zero new mechanism.  `objects`: optional
+        list of (name, x, y)."""
+        from ikigai.cognition.numeric_encoder import SpatialScene
+        sc = SpatialScene(d=d, scale=scale)
+        for (name, x, y) in (objects or []):
+            sc.add(name, x, y)
+        return sc
+
+    def substrate_policy(self, d=512, temp=0.6):
+        """Day-94 #5 -- a fresh SUBSTRATE PROPOSER: a holographic associative policy memory
+        (bind/bundle/cosine-cleanup, Hebbian, no backprop).  reinforce(state, action) on good
+        moves; propose(state, actions) to sample a resonance-biased action.  Feed its .propose
+        as the proposer to verified_search for a substrate-guided generator."""
+        from ikigai.cognition.generation_engine import SubstratePolicy
+        return SubstratePolicy(d=d, temp=temp)
+
+    def verified_search(self, propose, verify, budget=2000):
+        """Day-93 #8 -- generation-as-search-under-verification, native.  Draw cheap candidates
+        from propose(); keep the first verify(cand) accepts; ABSTAIN after budget.  Correct-or-
+        abstain by construction -- cannot emit an unverified answer.  Returns (solved, tries, ans)."""
+        from ikigai.cognition.generation_engine import verified_search
+        return verified_search(propose, verify, budget)
+
+    def plan_order(self, items, deps, lam=0.3):
+        """Day-94 #6 -- structure-first planning, native.  Order interdependent `items` (deps:
+        item -> prerequisites) by expected-free-energy argmin so the whole plan stays globally
+        consistent (each item after its prerequisites), one pass, no backtracking.  Holds long-
+        range consistency where a free walk collapses -- the code-planning mechanism."""
+        from ikigai.cognition.generation_engine import plan_order
+        return plan_order(items, deps, lam=lam)
+
+    def plan_discourse(self, facts, topic, goal, lam=1.0, entities_of=None):
+        """Day-94 #7 -- goal-driven discourse planning, native.  Order derived `facts` so the
+        discourse is coherent (entity continuity) AND lands on `goal` (the point).  Free-energy
+        argmin selection: epistemic=continuity, pragmatic=goal-timing.  Returns ordered facts."""
+        from ikigai.cognition.generation_engine import plan_discourse
+        return plan_discourse(facts, topic, goal, lam=lam, entities_of=entities_of)
+
+    def affect_valence(self, word):
+        """Day-94 -- a word's valence GROUNDED in LIVED affect: the mean felt emotion over the
+        organism's episodes that mention it (stem-matched).  Emotion learned from experience
+        (remember(emotion=...)), not an authored lexicon.  Returns a float or None if never lived."""
+        eps = getattr(self.mem, 'episodes', None)
+        if not eps:
+            return None
+
+        def stem(w):
+            w = str(w).lower()
+            for suf in ('ing', 'ed', 'es', 's', 'd'):
+                if w.endswith(suf) and len(w) - len(suf) >= 3:
+                    return w[:-len(suf)]
+            return w
+        s = stem(word)
+        tot = n = 0.0
+        for ep in eps:
+            if s in {stem(t) for t in ep.get('tokens', [])}:
+                tot += ep.get('v', 0.0); n += 1
+        return (tot / n) if n else None
+
+    # Day-99: marks a realized clause that does not open with its subject (an induced frame may be
+    # {O}-initial, e.g. "paris is the capital of france") -- such a clause is a whole sentence and
+    # must not be aggregated behind "It"/"The {topic}".
+    _STANDALONE = '\x00~'
+
+    def derive_ancestry(self, entity, links=('isa', 'subclassof'), max_depth=64):
+        """Day-99 -- THE ONE ANCESTRY OP.  Every path that needs "what is this, ultimately?" goes
+        through here.
+
+        Before this there were THREE, and they disagreed about the same fact:
+          * `compose` walked `eng.atom(link, cur)` in a python while-loop -- atom() returns ONE
+            parent (the cache's LAST value), so a multi-parent entity lost a parent AND everything
+            above it.  Measured: vikode isa feline AND pet; compose said "The vikode is a pet, and
+            ultimately a domestic" -- feline and mammal SILENTLY DROPPED.  This is the exact bug
+            Day-96 fixed inside transitive_reach (~15% of Wikidata p279 edges are multi-parent);
+            it was still live in the GENERATION path, which is the Day-100/101 headline.
+          * `transitive_reach` / `ancestors` -> None unless the miner has induced a transitive RULE.
+            NOT a bug, and I misdiagnosed it as one before measuring: refusing to assert x-isa-z
+            without having LEARNED that isa is transitive is the calibration doing its job. The
+            miner is healthy (measured chains=4 acyclic=4 conf=1.00 -> promoted). It needs 2-chains
+            (R(a)=b, R(b)=c, b a subject of R) -- and note the mining index is SINGLE-valued
+            (triples[(s,r)] = v), so a second parent OVERWRITES the first there and can hide the
+            chain from the miner. That is a real limitation of the index, not of the miner.
+        An omission that reads as completeness is the worst failure mode for correct-or-abstain:
+        compose was not wrong, it was quietly half-blind.
+
+        This op deliberately does NOT gate on the mined rule, because it REPORTS a derived chain
+        rather than asserting closure membership. compose's use of it inherits that: it will say
+        "ultimately a mammal" from the edges alone. That asymmetry with ancestors() is a real open
+        semantics question, flagged not buried.
+
+        BFS over `atoms()` (ALL parents), so it is complete by construction, and it needs no mined
+        rule -- it derives from the edges themselves.  Reads through the substrate: atoms() resolves
+        via the packed address store when authoritative, else the anchor cache.  Derive-not-store:
+        nothing here is written.
+
+        Returns {'order': ancestors nearest-first (BFS), 'direct': immediate parents,
+                 'roots': ancestors with no parent of their own}."""
+        eng = self.general_reasoner.derive_engine
+        e = str(entity).strip().lower().replace(' ', '')
+
+        def parents(x):
+            out = []
+            for link in links:
+                for p in (eng.atoms(link, x) or []):
+                    p = str(p).strip().lower().replace(' ', '')
+                    if p and p != x and p not in out:
+                        out.append(p)
+            return out
+
+        order, seen, frontier, depth = [], {e}, [e], 0
+        direct = []
+        while frontier and depth < max_depth:
+            nxt = []
+            for cur in frontier:
+                for p in parents(cur):
+                    if p in seen:
+                        continue
+                    seen.add(p)
+                    nxt.append(p)
+                    order.append(p)
+                    if depth == 0:
+                        direct.append(p)
+            frontier = nxt
+            depth += 1
+        roots = [a for a in order if not parents(a)]
+        return {'order': order, 'direct': direct, 'roots': roots}
+
+    @staticmethod
+    def _and_list(items):
+        """'a, b, and c' -- the surface form of a set, so multi-parent ancestry reads as prose."""
+        items = list(items)
+        if not items:
+            return ''
+        if len(items) == 1:
+            return items[0]
+        if len(items) == 2:
+            return f'{items[0]} and {items[1]}'
+        return ', '.join(items[:-1]) + f', and {items[-1]}'
+
+    def compose(self, topic, mood=(0.0, 0.3), elaborate=True):
+        """Day-94 -- OPEN-ENDED description of `topic`, grounded and unbounded.  Derives the topic's
+        class chain (aggregated) plus its INHERITED attributes -- the attribute relations are
+        DERIVED from the engine (every non-transitive relation an ancestor carries; no authored
+        relation list) -- realises each via induced surface frames, pronominalises after first
+        mention, and elaborates on referenced entities for length (all grounded).  `mood`=(valence,
+        arousal) conditions FORM only: high arousal -> short punchy sentences, low -> aggregated
+        flowing clauses; valence reorders.  Content is 100% derived (cannot hallucinate).  Honest:
+        form-level emotion, not emotional vocabulary; grammar is frame-level, not novelistic."""
+        eng = self.general_reasoner.derive_engine
+        topic = str(topic).strip().lower()
+        v, a = mood
+
+        def art(w):
+            return ('an ' if str(w)[:1] in 'aeiou' else 'a ') + str(w)
+
+        # class chain (taxonomic): transitive closure if mined, else walk direct parents
+        chain = []
+        for link in ('isa', 'subclassof'):
+            if eng.is_transitive(link):
+                chain = [c.replace(' ', '') for c in (eng.transitive_reach(link, topic) or [])[1:]]
+                if chain:
+                    break
+        # Day-99 -- the single-parent while-loop that used to live here dropped half the taxonomy of
+        # any multi-parent entity (measured: feline+mammal vanished from "vikode"). One shared op.
+        _anc = None
+        if not chain:
+            _anc = self.derive_ancestry(topic)
+            chain = _anc['order']
+        # Day-99 -- NO TAXONOMY IS NOT "UNKNOWN". This used to bail here whenever the entity had no
+        # class chain, so an entity the organism holds real facts about was declared unknown and
+        # `speak` withdrew: MEASURED org('chile') -> abstain while knows('chile') held
+        # {'capital': ['santiago'], 'continent': ['america']}. The organism knew chile's capital and
+        # would not volunteer it -- the same shape as answer() refusing Paris. Describing what it
+        # HOLDS needs no taxonomy; only the "is a X, and ultimately a Y" clause does. Fall through
+        # and let the attribute pass decide; abstain only if there is genuinely nothing to say.
+
+        # DERIVE the attribute relations: non-transitive relations carried by the topic or an
+        # ancestor (nearest-first inheritance) -- no authored relation list
+        taxo = {'isa', 'subclassof'}
+        attr_rels = [r for r in sorted(getattr(eng, 'relations', []))
+                     if r not in taxo and not eng.is_transitive(r)]
+        inh = []
+        for r in attr_rels:
+            for anc in [topic] + chain:
+                val = eng.atom(r, anc)
+                if val:
+                    inh.append((r, val)); break
+        if v < 0:
+            inh = list(reversed(inh))                          # valence reorders the foregrounding
+
+        # classification (aggregated).  Day-99: "ultimately" now names the ROOTS (ancestors with no
+        # parent of their own), not merely the last element of a walk -- with a DAG the last element
+        # is arbitrary.  For a single-parent chain roots == [chain[-1]] and the output is
+        # byte-identical to Day-98's ("The vikode is a feline, and ultimately a mammal."), so the
+        # measured 9.3 fluency is preserved; a multi-parent entity now states its full ancestry
+        # instead of silently dropping half of it.
+        if not chain:
+            # Nothing to classify it as -- but it may still hold attributes worth stating.
+            if not inh:
+                return f"The {topic} is unknown."          # genuinely nothing: abstain honestly
+            sents = []
+        else:
+            _roots = [r for r in (_anc['roots'] if _anc else []) if r in chain] or [chain[-1]]
+            _mids = [c for c in chain if c not in _roots]
+            if _mids:
+                sents = [f"The {topic} is {self._and_list([art(c) for c in _mids])}, "
+                         f"and ultimately {self._and_list([art(r) for r in _roots])}."]
+            else:
+                sents = [f"The {topic} is {self._and_list([art(r) for r in _roots])}."]
+
+        _vc = {}                                               # per-relation use count -> variant rotation
+
+        def _frame_val(frame):                                 # lived-affect valence of a frame's verb
+            cand = [self.affect_valence(t) for t in frame if t not in ('{S}', '{O}')]
+            cand = [x for x in cand if x is not None]
+            return max(cand, key=abs) if cand else None
+
+        def pred(r, val):
+            vs = self.surface.variants.get(r, [])
+            # EMOTION: if the organism has lived affect, pick the surface form whose verb valence
+            # best matches its mood; otherwise rotate the learned forms for variety.
+            if len(vs) > 1 and any(_frame_val(f) is not None for f in vs):
+                idx = min(range(len(vs)), key=lambda i: abs((_frame_val(vs[i]) or 0.0) - v))
+                raw = self.surface.realize(topic, r, val, variant=idx)
+            else:
+                i = _vc.get(r, 0); _vc[r] = i + 1
+                raw = self.surface.realize(topic, r, val, variant=i)
+            # Day-98 fix: strip the SUBJECT prefix for aggregation so "It " + predicate reads
+            # cleanly.  The old code only stripped "the {topic} "; a learned frame that aligns as
+            # "{topic} is amber" (no article) slipped through -> "It vikode is amber".  Strip
+            # whichever subject form the realized clause actually starts with.
+            for _pre in (f'the {topic} ', f'a {topic} ', f'an {topic} ', f'{topic} '):
+                if raw.startswith(_pre):
+                    return raw[len(_pre):]
+            # Day-99 -- an induced frame need not put the SUBJECT first. Real text gave
+            # capital -> "{O} is the capital of {S}", i.e. "paris is the capital of france": the
+            # clause opens with the OBJECT, so there is no subject prefix to strip and aggregating
+            # it under "It"/"The france" produced
+            #   "The france paris is the capital of france and its most important city."
+            # Day-98's aggregation silently assumed {S}-initial because every hand-taught frame was.
+            # A clause that does not open with its subject cannot be aggregated behind one -- it is
+            # already a complete sentence about the topic. Mark it so the caller emits it whole.
+            return self._STANDALONE + raw
+
+        # Day-99 -- the pronoun needs an ANTECEDENT. These clauses hardcoded "It", which only reads
+        # if the class sentence just named the topic. With no taxonomy there is no class sentence,
+        # so the description opened "It capital santiago." -- a pronoun referring to nothing. Name
+        # the topic when nothing else has; keep "It" when the class sentence already introduced it
+        # (so the Day-98 aggregation, measured at 9.3 fluency, is untouched).
+        _subj = 'It' if sents else f'The {topic}'
+
+        def _emit(p):
+            """A clause that does not open with its subject is already a whole sentence."""
+            if p.startswith(self._STANDALONE):
+                t = p[len(self._STANDALONE):].strip().rstrip('.')
+                return (t[0].upper() + t[1:] + '.') if t else ''
+            return None
+
+        if a >= 0.6:                                           # high arousal: short, punchy
+            for (r, val) in inh:
+                p = pred(r, val)
+                whole = _emit(p)
+                if whole:
+                    sents.append(whole); continue
+                s = _subj + ' ' + p + '.'
+                sents.append(s[0].upper() + s[1:])
+                _subj = 'It'                                   # introduced now -> pronominalise
+        elif inh:                                              # calm: aggregate into one flowing clause
+            raw_preds = [pred(r, val) for (r, val) in inh]
+            standalone = [w for w in (_emit(p) for p in raw_preds) if w]
+            preds = [p for p in raw_preds if not p.startswith(self._STANDALONE)]
+            if preds:
+                body = preds[0] if len(preds) == 1 else ', '.join(preds[:-1]) + ', and ' + preds[-1]
+                sents.append(_subj + ' ' + body + '.')
+            sents.extend(standalone)
+
+        # LENGTH: elaborate on referenced entities (grounded)
+        if elaborate:
+            for (r, val) in inh:
+                vc = [c.replace(' ', '') for c in (eng.transitive_reach('isa', val) or [])[1:]]
+                sub = None
+                for rr in attr_rels:
+                    x = eng.atom(rr, val)
+                    if x:
+                        j = _vc.get(rr, 0); _vc[rr] = j + 1
+                        sub = self.surface.realize(val, rr, x, variant=j); break
+                if sub:                                    # entity has its own attribute -> elaborate
+                    piece = f"The {val}" + (f", {art(vc[0])}," if vc else "") + \
+                            f" {sub.split(val, 1)[1].strip()}."
+                    sents.append(piece)
+                elif vc:                                   # else just classify it
+                    sents.append(f"The {val} is {art(vc[0])}.")
+        return ' '.join(sents)
+
+    def _fluent_fact(self, entity, rel, obj, first=True):
+        """Render ONE derived fact as a fluent grounded clause. Prefers the organism's
+        OWN induced surface frame for the relation (learned from text); falls back to a
+        generic grammatical frame 'the {rel} of {ent} is {obj}' -- a uniform syntactic
+        scaffold, not authored domain knowledge (it works for ANY relation). Grounded:
+        the content is a derived fact, never invented."""
+        e, r, o = str(entity), str(rel), str(obj)
+        # try the induced surface realization if it is a real sentence (has a verb/'is')
+        try:
+            raw = self.surface.realize(e, r, o)
+            if raw and (' is ' in raw or ' of ' in raw) and raw.lower() != f'{e} {r} {o}':
+                return raw.strip().rstrip('.')
+        except Exception:
+            pass
+        subj = f'the {r} of {e}' if first else f'its {r}'
+        return f'{subj} is {o}'
+
+    def _mood_from_body(self):
+        """Day-103 -- (valence, arousal) read from the neuroendocrine body, so the
+        organism SPEAKS in its current felt state. valence = dopamine above tonic
+        baseline minus cortisol above baseline (reward - stress); arousal =
+        norepinephrine. Ties the emotion channel into generation form (compose's
+        mood conditions sentence length/order, never vocabulary)."""
+        try:
+            da = self.body.get('dopamine'); co = self.body.get('cortisol')
+            ne = self.body.get('norepinephrine')
+            val = (float(getattr(da, 'level', 0.5)) - 0.5) - (float(getattr(co, 'level', 0.1)) - 0.1)
+            aro = float(getattr(ne, 'level', 0.3)) if ne is not None else 0.3
+            return (max(-1.0, min(1.0, val)), max(0.0, min(1.0, aro)))
+        except Exception:
+            return (0.0, 0.3)
+
+    def answer_fluent(self, query):
+        """Day-103 -- DERIVE + FLUENT, and TALK TILL DONE. A question can ask for MORE
+        than one thing ('what is the capital of france AND what continent is it in') --
+        so: extract every RELATION the query asks for (relation-words the engine knows),
+        resolve the entity they are about, DERIVE each fact, realise each as a fluent
+        clause, and keep speaking until EVERY asked fact is covered, then HALT. It scopes
+        to what was ASKED (not a dump of everything known), it is grounded (only derived
+        facts -- cannot hallucinate), and it stops when done (the asked relations are
+        exhausted). Returns a fluent sentence, or None to defer (nothing asked/derivable).
+
+        This is the factual arm of the DERIVE-not-store generator: the content is derived
+        per relation, the form is a fluent clause per fact, aggregated and pronominalised.
+        Later relations about the same entity pronominalise ('...and its continent is
+        europe') so it reads as one answer, not a list."""
+        try:
+            toks = [t for t in self.general_reasoner.tokenize(str(query)) if t]
+        except Exception:
+            return None
+        # Resolve the ENTITY and the ASKED relations together from what the organism
+        # actually HOLDS (knows() -- the broad derived fact web, not just the derive
+        # engine's 5 core relations): the entity is the query token whose known
+        # relations the query most asks about, and the asked relations are those of its
+        # relations named in the query. This dodges the store fragmentation where
+        # currency/language live in knows() but not in derive_engine.relations.
+        best = None
+        for t in toks:
+            try:
+                web = self.knows(t) or {}
+            except Exception:
+                web = {}
+            if not web:
+                continue
+            asked = [r for r in web if r in toks and (web.get(r))]
+            if asked and (best is None or len(asked) > len(best[1])):
+                best = (t, asked, web)
+        if best is None:
+            return None
+        entity, asked_set, web = best
+        asked = [r for r in toks if r in asked_set]              # in query order, de-dup
+        seen = set()
+        # derive + realise each asked fact; talk till the asked set is covered, then halt
+        clauses = []
+        for r in asked:
+            if r in seen:
+                continue
+            seen.add(r)
+            vals = web.get(r) or []
+            if vals:
+                clauses.append(self._fluent_fact(entity, r, vals[0], first=(len(clauses) == 0)))
+        if not clauses:
+            return None                              # asked, but nothing derivable -> defer
+        if len(clauses) == 1:
+            s = clauses[0]
+        else:
+            s = ', and '.join([', '.join(clauses[:-1]), clauses[-1]]) if len(clauses) > 2 \
+                else ' and '.join(clauses)
+        s = s.strip()
+        return s[0].upper() + s[1:] + '.'
+
+    def express(self, topic=None, message=None, mood=None, rng_seed=0):
+        """Day-103 -- THE ONE GENERATOR. Everything the organism says routes here, and
+        every other generator is a mode of it. It unifies the principles read across
+        the ~20 scattered generators into a single grounded, honest, structure-first,
+        affect-aware speaker that DEGRADES GRACEFULLY:
+
+          1. BEST PATH -- when the organism has induced distributional frames (from
+             reading), realize_fluent fills an induced frame slot-by-slot by
+             product-of-experts over STRUCTURE (induced type) x LOCAL FLUENCY
+             (pcseq reservoir + grounded bigram) x TOPIC (meaning-fit). Free syntax,
+             no template, learned entirely from data.
+          2. GROUNDED FALLBACK -- when frames are sparse (the common case until the
+             organism has read enough), compose realises the topic over SURFACE
+             relation-frames: class chain + inherited attributes, pronominalised and
+             aggregated, form conditioned by the body's MOOD. 100% derived.
+          3. HONEST HALT -- never fabricates; returns None / 'unknown' with nothing
+             grounded to say.
+
+        So it MOVES A NEEDLE natively: identical to today's speak on a data-sparse
+        organism (compose), and upgrades to free fluent syntax the moment reading has
+        given it frames -- no flag, no separate call. Mood defaults to the body's own
+        felt state, so the organism speaks as it feels."""
+        mood = mood if mood is not None else self._mood_from_body()
+        # The organism is DERIVE-not-store: it never retrieves a stored sentence, it
+        # DERIVES what to say from memory. Generation has TWO jobs -- derive the grounded
+        # CONTENT (never hallucinate) and realize it in fluent FORM -- and this ONE entry
+        # owns both. Which REALIZER leads is decided by "moves a needle", not by dogma:
+        #
+        # DESCRIBING A KNOWN ENTITY (topic): compose realises the DERIVED class-chain +
+        # inherited attributes over SURFACE relation-frames -- grounded, coherent,
+        # mood-conditioned. MEASURED: on real induced data the free induced-frame fill
+        # is still word-salad (the linear-VSA generation wall, documented), i.e. it
+        # moves the needle BACKWARD for a known topic, so compose leads here. The fluent
+        # realizer is wired and ready to take over the instant its quality beats compose
+        # (the gen-quality wall's job -- biological gen / hybrid), no code change needed.
+        if topic is not None:
+            try:
+                said = self.compose(topic, mood=mood)      # derive + realize (grounded)
+            except Exception:
+                said = None
+            if said and not said.strip().endswith('is unknown.'):
+                return said
+            # nothing groundable to describe -> fall through to free generation
+        # FREE GENERATION FROM AN INTENTION (message, no groundable topic): fill an
+        # INDUCED frame by the GROUNDED transition walk restricted to each slot's type,
+        # steered by the derived content as theme. MEASURED on real Tatoeba: this
+        # (generate_structured) produces genuinely fluent English -- 100% real bigrams,
+        # ~60% real trigrams -- whereas the bag-of-meaning fill (realize_fluent) scatters
+        # words into 2% bigram salad. Local fluency is NOT the VSA wall; the open gap is
+        # meaning/long-range coherence, which the theme + derived content steer. Only
+        # fires when the organism has induced frames from reading.
+        if message:
+            try:
+                fi = self.frame_inducer
+                frm = fi.pick_frame(__import__('random').Random(rng_seed))
+                if frm:
+                    seed = message[0] if message else 'the'
+                    r = self.generate_structured(seed, list(frm), fi.type_lexicon(),
+                                                 theme=list(message))
+                    seq = r.get('sequence') if isinstance(r, dict) else None
+                    if seq:
+                        s = ' '.join(seq).strip()
+                        return s[0].upper() + s[1:] + ('.' if not s.endswith('.') else '')
+            except Exception:
+                pass
+        return None                                  # honest halt -- nothing derived to say
 
     def set_purpose(self, topic):
         """Day-86 -- give the organism an IKIGAI: a topic that STEERS what it
@@ -2942,44 +4706,6 @@ class IkigaiOrganism:
             eng._record(subj, rel, val)
         return {'facts': facts, 'absorbed': added}
 
-    def describe(self, entity, max_facts=6):
-        """Pack 301 v0 -- coherent multi-fact speech.  Gather every fact the
-        organism knows about `entity` from its OWN atom index, speak each as
-        a sentence (learned template / schema), assemble a topic-anchored
-        multi-sentence answer.  Coherence = every sentence is about the
-        entity.  Returns {entity, sentences, text, facts, on_topic}."""
-        eng = self.general_reasoner.derive_engine
-        from ikigai.cognition.compositional import _REL_TEMPLATES
-        ent = str(entity).strip().lower()
-        # probe every relation the organism has GRAMMAR for (its known
-        # relation vocabulary) -- atom() reads the fact cache.  Index-first
-        # ordering, then any other known relations.
-        idx_rels = [r for (s, r) in eng.triples if s == ent]
-        ordered, seen = [], set()
-        for r in list(idx_rels) + sorted(eng.relations) + list(_REL_TEMPLATES):
-            if r not in seen:
-                seen.add(r); ordered.append(r)
-        from ikigai.cognition.sentence_frame import SentenceFramer
-        framer = getattr(self, '_sentence_framer', None) or SentenceFramer()
-        self._sentence_framer = framer
-        lt = self.lang_teacher
-        sentences, facts = [], []
-        for rel in ordered[:max_facts]:
-            val = eng.atom(rel, ent)              # value from the atom index
-            if not val or val == 'unknown':
-                continue
-            if rel in lt.templates:
-                s, by = lt.say(rel, ent, val), 'learned'
-            else:
-                s, by = framer.frame(f'what is the {rel} of {ent}', val), 'schema'
-            if s:
-                sentences.append(s)
-                facts.append((rel, val, by))
-        text = ' '.join(sentences)
-        on_topic = sum(1 for s in sentences if ent in s.lower())
-        return {'entity': ent, 'sentences': sentences, 'text': text,
-                'facts': facts, 'on_topic': on_topic, 'n': len(sentences)}
-
     @property
     def cat4(self):
         """Pack 262 cat-4 ICL pair absorb -- Kanerva 2026 focus vector
@@ -2997,7 +4723,13 @@ class IkigaiOrganism:
             if pik is None:
                 pik = PiK(d=self.unified.d, n_primes=16)
                 self._pik = pik
-            c = Cat4Absorb(self.unified, self.num_enc, pik)
+            # Day 101: share the organism's own FactoredMeaning store (Day 91,
+            # already persisted in save_ikg/load_ikg) for chunked-code anchor
+            # identification -- MEASURED to hold recall at production scale
+            # (N=137,450) where cosine-over-recall_batch state ranking
+            # collapses (Kanerva load factor ~1,432, Day 100 finding).
+            c = Cat4Absorb(self.unified, self.num_enc, pik,
+                            state_codes=self.factored)
             # Pack 273 + Pack 279 cache restore.  Accepts both legacy
             # dict[str, list[tuple[str]]] format (Pack 273+274 organisms)
             # and the compact dict[int, bytes] format (Pack 279+).  The
@@ -3113,13 +4845,6 @@ class IkigaiOrganism:
         return self.vs_fsm.observe_chain(toks, n_reinforce=n_reinforce,
                                             do_trigram=do_trigram,
                                             surprise_gate=surprise_gate)
-
-    def fsm_generate(self, seed, max_tokens=20, n_iters=5, beta=8.0,
-                       stop_tokens=None, verbose=False):
-        """Pack 225 -- Resonator-decoded FSM generation."""
-        return self.vs_fsm.generate(seed, max_tokens=max_tokens,
-                                       n_iters=n_iters, beta=beta,
-                                       stop_tokens=stop_tokens, verbose=verbose)
 
     def organism_step(self, prev, current, candidates=None, n_iters=3,
                         beta=8.0, top_k=5,
@@ -3240,25 +4965,24 @@ class IkigaiOrganism:
                     pass
 
         # --- Channel 5: crystal SVO triples filtered by current ---
+        # Day-97 FIX: this read `_crystallizer` / `crystallizer`.  The attribute is `crystal`
+        # (set in __init__), so the lookup ALWAYS returned None and this channel had never once
+        # fired.  It also probed `.triples` / `._triples`, which AtomicCrystallineStore does not
+        # have -- its observations live in `._counts` keyed by the (s, p, o) triple.
         if 'crystal' in channels:
-            cryst = getattr(self, '_crystallizer', None) or \
-                    getattr(self, 'crystallizer', None)
-            if cryst is not None:
+            cryst = getattr(self, 'crystal', None)
+            counts = getattr(cryst, '_counts', None) if cryst is not None else None
+            if counts:
                 try:
-                    triples = getattr(cryst, 'triples', None) or \
-                              getattr(cryst, '_triples', None) or []
-                    if hasattr(triples, '__iter__'):
-                        for tr in triples:
-                            if isinstance(tr, (list, tuple)) and len(tr) >= 3:
-                                s, v, o = tr[0], tr[1], tr[2]
-                                if s == current and v in candidates:
-                                    score_map[v] = score_map.get(v, 0.0) + \
-                                        weights['crystal'] * 0.5
-                                    chan_hits['crystal'] += 1
-                                if v == current and o in candidates:
-                                    score_map[o] = score_map.get(o, 0.0) + \
-                                        weights['crystal'] * 0.5
-                                    chan_hits['crystal'] += 1
+                    for (s, v, o), _cnt in counts.items():
+                        if s == current and v in candidates:
+                            score_map[v] = score_map.get(v, 0.0) + \
+                                weights['crystal'] * 0.5
+                            chan_hits['crystal'] += 1
+                        if v == current and o in candidates:
+                            score_map[o] = score_map.get(o, 0.0) + \
+                                weights['crystal'] * 0.5
+                            chan_hits['crystal'] += 1
                 except Exception:
                     pass
 
@@ -3313,14 +5037,18 @@ class IkigaiOrganism:
                 pass
 
         # --- Channel 8: importance_decay weighting ---
+        # Day-97 FIX: this gated on hasattr(imp, 'importance').  ImportanceDecayLattice has no
+        # such method -- `importance(alpha, beta)` is on the ITEM class; the lattice exposes
+        # `strength(name, now)` (the Ebbinghaus-decayed weight) and `importances()`.  The gate was
+        # therefore always False and this channel had never once fired.
         if 'importance' in channels:
             try:
-                imp = getattr(self, 'imp_lattice', None) or \
-                      getattr(self, 'decay', None)
-                if imp is not None and hasattr(imp, 'importance'):
+                imp = getattr(self, 'imp_lattice', None)
+                if imp is not None and hasattr(imp, 'strength'):
+                    now = getattr(self, '_self_tick', None)
                     for tok in list(score_map.keys())[:top_k*4]:
                         try:
-                            w = imp.importance(tok)
+                            w = imp.strength(tok, now=now)
                             if w is not None:
                                 score_map[tok] = score_map.get(tok, 0.0) * \
                                     (1.0 + weights['importance'] * float(w))
@@ -3584,15 +5312,6 @@ class IkigaiOrganism:
             max_clusters_per_length=max_clusters_per_length,
             min_cluster=min_cluster, verbose=verbose)
 
-    def fsm_generate_schema(self, seed, max_tokens=20, n_iters=5, beta=8.0,
-                              stop_tokens=None, verbose=False):
-        """Pack 226 schema-aware generation. Walks both abstract (schema_next)
-        and concrete (next) attractors via Resonator decoding."""
-        return self.vs_fsm.generate_via_schema(seed, max_tokens=max_tokens,
-                                                  n_iters=n_iters, beta=beta,
-                                                  stop_tokens=stop_tokens,
-                                                  verbose=verbose)
-
     def fsm_iterative_refine_trigram(self, texts, n_epochs=8, predict_iters=3,
                                          delta_strength=3, hebbian_strength=1,
                                          verbose=False):
@@ -3775,6 +5494,74 @@ class IkigaiOrganism:
         return p.plan_with_backtrack(start_state, goal_state,
                                      max_depth=max_depth, branching=branching)
 
+    def act(self, goal_state, action_pool=None, start_state=None, max_steps=8,
+            world=None):
+        """Day-103 -- THE AGENTIC LOOP: the organism PURSUES a goal, closed-loop.
+
+        org.plan() is one-shot OPEN-loop search (beam/DFS over the world MODEL). This
+        is the deliberative arm the audit named missing: a CLOSED loop of genuine
+        active inference -- perceive the state, EFE-select the next action (the
+        ActiveInferencePlanner pillar: minimise expected free energy = -(epistemic +
+        pragmatic) toward the goal), ACT in the world, OBSERVE what actually happened,
+        and -- the point of closing the loop -- LEARN from surprise (write the real
+        transition into the causal world model) and replan from the true state. An
+        open-loop plan built on an INCOMPLETE model gets stuck; acting-and-observing
+        discovers the missing transition and reaches the goal anyway.
+
+        Uses the existing pillars only (ActiveInferencePlanner.score_actions +
+        CausalWorldModel.predict/add_transition) -- no new search algorithm, no python
+        maze. `world(state, action) -> next_state` is the real environment; without it
+        the organism acts inside its own model (cwm.predict), which is pure planning.
+
+        Returns {success, final_state, steps, trajectory, learned} where trajectory is
+        [(state, action, next_state, efe, surprised?), ...]."""
+        ap = getattr(self, 'active_planner', None)
+        cwm = getattr(self, '_active_cwm', None)
+        if ap is None or cwm is None:
+            return None
+        pool = list(action_pool) if action_pool else list(getattr(cwm, '_actions', {}) or [])
+        if not pool:
+            return {'success': False, 'final_state': start_state, 'steps': 0,
+                    'trajectory': [], 'learned': 0, 'reason': 'no actions'}
+        state = start_state if start_state is not None else getattr(self, '_act_state', None)
+        traj = []; learned = 0; visited = set()
+        for _ in range(int(max_steps)):
+            if state == goal_state:
+                break
+            # REPLAN each step: multi-step EFE lookahead (ap.plan beam search short-
+            # circuits on the goal) picks the next action toward goal. Single-step
+            # score_actions has no goal gradient across hops on abstract states, so the
+            # loop must plan, not act greedily -- then act only the FIRST step and
+            # re-plan from what actually happened. That is the closed loop.
+            pl = ap.plan(state, pool, goal_state=goal_state)
+            ptraj = pl.get('trajectory') or []
+            if not ptraj:
+                break
+            action = ptraj[0][1]; efe = round(float(ptraj[0][3]), 3)
+            # the model's OWN expectation (for surprise detection)
+            mpred = cwm.predict(state, action, top_k=1)
+            model_next = mpred[0][0] if mpred else None
+            # ACT: the world responds if given, else the organism acts in its model
+            nxt = world(state, action) if world is not None else model_next
+            if nxt is None:
+                break
+            surprised = (world is not None and nxt != model_next)
+            if surprised:
+                # LEARN from surprise -- the loop's whole reason to close
+                try:
+                    cwm.add_transition(state, action, nxt); learned += 1
+                except Exception:
+                    pass
+            traj.append((state, action, nxt, efe, surprised))
+            # cycle guard: (state, action) revisited without progress -> stop
+            if (state, action) in visited and not surprised:
+                break
+            visited.add((state, action))
+            state = nxt
+        self._act_state = state
+        return {'success': state == goal_state, 'final_state': state,
+                'steps': len(traj), 'trajectory': traj, 'learned': learned}
+
     # ── Day 90: THE DEPTH LOOP -- one arbiter, small chat -> big artifact ──
     def respond(self, request, _depth=0, _max_depth=6):
         """Day 90 -- UNDERSTAND -> RESPOND as ONE emergent loop, at any DEPTH.
@@ -3805,6 +5592,14 @@ class IkigaiOrganism:
         chose_plan = (method == 'planner' and plan
                       and plan.get('success') and plan.get('trajectory'))
         if not chose_plan or _depth >= _max_depth:
+            # Day 94 -- UNIFIED SELF hook: when the arbiter GIVES UP (abstain/empty), consult the
+            # ONE memory (org.mem) before returning 'unknown'.  Fires ONLY on give-up, so exacts
+            # (arith/derive/multihop/cache) and every regression capability are untouched.
+            if ans in (None, 'unknown') and method in ('abstain', 'empty', None):
+                mem_ans = self._answer_from_mem(str(request))
+                if mem_ans is not None:
+                    return {'answer': mem_ans, 'depth': _depth + 1, 'method': 'b_world_mem',
+                            'plan': None, 'parts': None}
             return {'answer': ans, 'depth': _depth + 1, 'method': method,
                     'plan': plan if chose_plan else None, 'parts': None}
         # the ARBITER chose to decompose (argmin F) -- enact it: EXECUTE each hop
@@ -3820,6 +5615,38 @@ class IkigaiOrganism:
         artifact = self._stitch_path(start, traj, goalst)
         return {'answer': artifact, 'depth': child_depth, 'method': 'plan+execute',
                 'plan': plan, 'parts': parts}
+
+    def _answer_from_mem(self, text):
+        """Day 94 -- answer from the UNIFIED SELF (org.mem) when the arbiter abstained.  Data-
+        driven: DERIVE about each content token of the query and answer from whatever the one
+        memory actually knows (transitive class chain + inherited + invented) -- no authored word
+        list, no parse template.  Returns a grounded answer string or None.  Additive: only reached
+        on give-up, so the exact reasoning path is unchanged."""
+        try:
+            toks = list(self.general_reasoner.tokenize(text))
+        except Exception:
+            toks = str(text).lower().split()
+        mem = self.mem
+        eng = self.general_reasoner.derive_engine
+        for t in toks:
+            if len(t) <= 2:
+                continue                          # skip short function tokens (length, not a list)
+            facts = []
+            try:
+                facts.extend(mem.describe(t))     # DERIVED (transitive chain + inherited + invented)
+            except Exception:
+                pass
+            try:                                  # DIRECT one-hop atoms (any relation the memory holds)
+                for r in sorted(eng.relations):
+                    v = eng.atom(r, t)
+                    if v and (r, v) not in facts:
+                        facts.append((r, v))
+            except Exception:
+                pass
+            if facts:
+                parts = [f"{t} {r} {v}" for (r, v) in facts[:6]]
+                return ' ; '.join(parts)
+        return None
 
     def _stitch_path(self, start, trajectory, goalst):
         """Render an executed trajectory as a grounded sequence via the generation
@@ -3938,6 +5765,25 @@ class IkigaiOrganism:
                 if hasattr(self.crystal, 'unique_triples') else 0
         except Exception as e:
             stats['crystal_err'] = str(e)[:80]
+        # Day-95 -- refresh the substrate REACH bank in sleep: re-consolidate the transitive
+        # closure onto the hashed-address store so reach_member stays a flat substrate read as new
+        # facts arrive. Only if reach was ever used (idle organisms pay nothing). Part of the
+        # autonomous loop -- the organism keeps its substrate reasoning current while it sleeps.
+        try:
+            if getattr(self, '_reach_store', None) is not None:
+                link = getattr(self, '_reach_link', 'isa')
+                stats['reach_pairs'] = self.consolidate_reach(link).get('pairs', 0)
+                self._reach_dirty = False
+        except Exception as e:
+            stats['reach_err'] = str(e)[:80]
+        # Day-96 -- refresh the MULTI-VALUE ancestor set-recall bank the same way (only if used).
+        try:
+            if getattr(self, '_anc_sdm', None) is not None:
+                link = getattr(self, '_anc_link', 'isa')
+                stats['ancestor_pairs'] = self.consolidate_ancestors(link).get('pairs', 0)
+                self._anc_dirty = False
+        except Exception as e:
+            stats['ancestor_err'] = str(e)[:80]
         # Re-run concept synth as part of sleep (if not already done)
         try:
             if not getattr(self, '_concepts', None):
@@ -4092,7 +5938,10 @@ class IkigaiOrganism:
 
         if importance_track:
             try:
-                idec = self.importance_decay        # lazy property
+                # Day-97 FIX: this said `self.importance_decay`, which is not an attribute of the
+                # organism (the lattice is `imp_lattice`).  The AttributeError was swallowed into
+                # importance_err, so this sleep phase had never once run.
+                idec = self.imp_lattice
                 for ti, text in enumerate(texts):
                     toks = [t for t in str(text).lower().split() if t]
                     if toks:
@@ -4221,12 +6070,7 @@ class IkigaiOrganism:
     # mission). LLM knowledge enters via the teacher data-oracle path, not weights.
 
     # ── Pack 195p: .ikg auto-load / auto-save (kill stack #10) ──────────
-    # Portable default: env IKIGAI_IKG, else organism.ikg next to this file.
-    # (organism.ikg is gitignored / not shipped; the benchmark boots an empty
-    #  organism and never needs it.)
-    DEFAULT_IKG_PATH = os.environ.get(
-        'IKIGAI_IKG',
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'organism.ikg'))
+    DEFAULT_IKG_PATH = os.environ.get('IKIGAI_IKG', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'organism.ikg'))
 
     def load_ikg(self, path=None):
         """Replace self.unified with substrate loaded from .ikg file.
@@ -4298,6 +6142,21 @@ class IkigaiOrganism:
         except Exception:
             pass
         self._ikg_path = path
+        # Day-97 WIRE -- the packed fact store rides with the organism.  The Day-96/97 address
+        # store was built, gated, and then called by NOTHING: the census found `load_facts` /
+        # `ingest_addressed` / `reach_addressed` ORPHANED (0 call sites anywhere), because every
+        # gate exercised AddressFactStore DIRECTLY and no production path ever loaded one.  A wire
+        # nothing plugs into is not wired.  So: if a sidecar `<ikg>.facts` exists, mmap it here and
+        # attach it to the derive engine -- bulk graph knowledge becomes live by DEFAULT, at
+        # ~0 MB resident (the store stays on disk).  Absent sidecar -> no-op, nothing changes.
+        facts_path = path + '.facts'
+        n_edges = 0
+        if os.path.exists(facts_path):
+            try:
+                st = self.load_facts(facts_path, mmap=True)
+                n_edges = st.n_edges
+            except Exception:
+                n_edges = 0
         return {'path': path, 'd': self.unified.d,
                  'sdm_M': self.unified.sdm.M,
                  'sdm_rel_M': self.unified.sdm_rel.M,
@@ -4305,7 +6164,8 @@ class IkigaiOrganism:
                  'seen': len(self.unified._seen),
                  'frame_locked': bool(self.frames.locked),
                  'frame_assigns': self.frames.assigns_per_frame.tolist(),
-                 'pack220_modules_restored': n_restored}
+                 'pack220_modules_restored': n_restored,
+                 'packed_edges': n_edges}
 
     # Pack 220 -- list of wired modules whose state persists in .ikg
     _PERSIST_ATTRS = (
@@ -4334,6 +6194,17 @@ class IkigaiOrganism:
         # Pack 300.1 (Day 79) -- learned sentence templates (language
         # teach).  Lives off b_self.
         '_lang_templates',
+        # Day 104 -- the surface realizer: induced/curiosity-learned relation
+        # FRAMES (templates + variants). Grammar is learned from exposure, so it
+        # must persist like the facts, not be re-induced every boot.
+        '_surface',
+        # Day 104 -- the organism's SELF-KNOWLEDGE (who it is). Innate default;
+        # once seeded it persists, so it stays knowing across reload.
+        '_identity',
+        # Day 104 -- the closed-class grammar LEARNED from the corpus (function words +
+        # interrogatives). Emergent from frequency + '?' openers, not authored -- persists
+        # so the organism keeps the language it learned across reload.
+        '_function_words', '_interrogatives',
     )
 
     # Pack 246b (Day 70) -- modules with back-references to organism. Cannot
@@ -4380,6 +6251,31 @@ class IkigaiOrganism:
                                                     protocol=_pkl.HIGHEST_PROTOCOL)
             except Exception:
                 pass
+        # Day 91: factored-meaning codes (word-keyed, ck-independent; H regenerates from
+        # seed).  Persist only params + the bytes/word code store so trained MEANING survives
+        # reload -- the readable-past-the-knee store lives in .ikg like the substrate.
+        fm = getattr(self, '_factored', None)
+        if fm is not None and getattr(fm, 'codes', None):
+            try:
+                out['_factored_state'] = _pkl.dumps(fm.state_dict(),
+                                                    protocol=_pkl.HIGHEST_PROTOCOL)
+            except Exception:
+                pass
+        # Day 91: RHC fact store (address-tuples, tiny) -- durable knowledge in .ikg.
+        fs = getattr(self, '_fact_store', None)
+        if fs is not None and fs.n_facts:
+            try:
+                out['_fact_store_state'] = _pkl.dumps(fs.state_dict(),
+                                                      protocol=_pkl.HIGHEST_PROTOCOL)
+            except Exception:
+                pass
+        # Day 91: the one memory (people, goals, emotions, episodes) -- the continuous self.
+        sm = getattr(self, '_mem', None)
+        if sm is not None and sm.n_memories:
+            try:
+                out['_mem_state'] = _pkl.dumps(sm.state_dict(), protocol=_pkl.HIGHEST_PROTOCOL)
+            except Exception:
+                pass
         return out
 
     def _apply_wired_state(self, state_dict):
@@ -4409,6 +6305,28 @@ class IkigaiOrganism:
                 except Exception:
                     pass
                 continue
+            if attr == '_factored_state':
+                # Day 91: rebuild the factored-meaning store from persisted codes.
+                try:
+                    st = _pkl.loads(blob)
+                    self.factored.load_state(st)          # lazy-builds with current ck
+                except Exception:
+                    pass
+                continue
+            if attr == '_fact_store_state':
+                # Day 91: rebuild the RHC fact store from persisted address-tuples.
+                try:
+                    self.fact_store.load_state(_pkl.loads(blob))
+                except Exception:
+                    pass
+                continue
+            if attr == '_mem_state':
+                # Day 91: restore the continuous self (people, goals, emotions, episodes).
+                try:
+                    self.mem.load_state(_pkl.loads(blob))
+                except Exception:
+                    pass
+                continue
             try:
                 obj = _pkl.loads(blob)
                 if isinstance(obj, dict) and '_pack220_err' in obj:
@@ -4422,11 +6340,31 @@ class IkigaiOrganism:
         except Exception:
             pass
 
-    def save_ikg(self, path=None):
+    def save_ikg(self, path=None, allow_production=False):
         """Save current substrate + frames + Pack 220 wired-module state to
-        .ikg (kill stack #10 format)."""
+        .ikg (kill stack #10 format).
+
+        Day-97 GUARD.  The project's oldest standing rule is that the PRODUCTION organism
+        (DEFAULT_IKG_PATH) is LOAD-ONLY -- it is never saved, because a save from a partially
+        built organism destroys months of ingested knowledge.  That rule lived only in a human's
+        head, and on Day 97 an AUDIT script called `org.save_ikg()` with no arguments (every
+        parameter had a default, so a blind zero-arg probe reached it) and overwrote the 193 MB
+        production organism with a 6 MB empty one.  There was no backup.
+
+        The rule is now enforced by the code, not by memory: writing to the production path
+        requires `allow_production=True`, stated explicitly, at the call site.  A no-arg
+        `save_ikg()` can no longer destroy anything."""
         if path is None:
             path = getattr(self, '_ikg_path', None) or self.DEFAULT_IKG_PATH
+        if not allow_production:
+            _prod = os.path.abspath(self.DEFAULT_IKG_PATH)
+            if os.path.abspath(str(path)) == _prod:
+                raise PermissionError(
+                    f'refusing to overwrite the PRODUCTION organism at {path}.\n'
+                    '  organism.ikg is LOAD-ONLY (standing rule). It was destroyed once, on '
+                    'Day 97, by exactly this call with no arguments.\n'
+                    '  If you truly mean to persist production: back it up first, run the '
+                    'regression gate, then call save_ikg(path, allow_production=True).')
         # Pack 197: ensure frame ref is set so save_ikg pulls frame state
         self.unified._frame_field_ref = self.frames
         # Pack 273: sync cat4 anchor-action cache up to persisted attr
@@ -5181,39 +7119,550 @@ class IkigaiOrganism:
         return {'n_before': n_before, 'verb': verb, 'modifier': modifier,
                 'answer': ans, 'known_verbs': list(self.unified._verb_seen)}
 
-    def flat_generate(self, prompt='', max_len=15, top_k=20,
-                      temperature=0.7, seed=None):
-        """
-        Generate text using ONLY the unified flat substrate (no dict bigrams,
-        no IkigaiBeing lexicon). Markov walk: next-word candidates pulled from
-        unified['next'] role, scored by cleanup cosine, sampled by softmax.
-        Pack 120 -- generation off the dict.
-        """
-        import random as _random, re as _re_local
-        rng = _random.Random(seed)
-        toks = [t for t in _re_local.sub(r"[^a-z0-9'\s]", ' ', prompt.lower()).split() if t]
-        if not toks:
-            return ''
-        out = list(toks)
-        for _ in range(max_len):
-            cands = self.unified.next_word_candidates(out[-1], top_k=top_k)
-            cands = [(w, s) for w, s in cands if s > 0]   # keep positive-scored
-            if not cands:
-                break
-            import numpy as _np
-            scores = _np.array([s for _, s in cands], dtype=_np.float64)
-            scores = scores / max(temperature, 1e-3)
-            scores = scores - scores.max()
-            probs = _np.exp(scores); probs = probs / probs.sum()
-            idx = rng.choices(range(len(cands)), weights=probs)[0]
-            out.append(cands[idx][0])
-        return ' '.join(out)
-
-    # ── flat-memory interface (Pack 114-115) ─────────────────────────────────
-
     def flat_similarity(self, w1, w2):
         """Word similarity from the constant-RAM flat substrate."""
         return self.flat.similarity(w1, w2)
+
+    @property
+    def factored(self):
+        """Day 91 -- FACTORED distributional-meaning store (RHC for vectors).  The shared-
+        superposition cooccur bank saturates ~20k vocab (crosstalk destroys the readout); this
+        stores each word's meaning as K*b random-hyperplane bits (capacity 2^bits, similarity by
+        bit-agreement), readable past the knee to billions at bytes/word.  Lazy + shares the
+        organism's ck word-identity space.  Feed it via org.observe_meaning / consolidate_meaning;
+        semantic_sim prefers it when a word is coded."""
+        fm = getattr(self, '_factored', None)
+        if fm is None:
+            from ikigai.cognition.factored_meaning import FactoredMeaning
+            ck = self.unified.ck if getattr(self, 'unified', None) is not None else self.flat.ck
+            fm = FactoredMeaning(ck, bits=512, window=3, seed=91)
+            self._factored = fm
+        return fm
+
+    def observe_meaning(self, docs):
+        """Stream co-occurrence documents into the factored-meaning store.  `docs` = iterable of
+        token lists or strings.  Call consolidate_meaning() to project to durable codes."""
+        fm = self.factored
+        n = 0
+        for d in docs:
+            toks = d.split() if isinstance(d, str) else list(d)
+            n += fm.observe_cooccur(toks)
+        return n
+
+    def consolidate_meaning(self, drop_acc=True):
+        """Project accumulated co-occurrence embeddings to durable factored codes (biology:
+        consolidation).  Returns #words coded.  After this, semantic_sim reads the code store."""
+        return self.factored.consolidate(drop_acc=drop_acc)
+
+    # ── Day 92: PATH A -- local-learning SEQUENCE model (predictive coding, no backprop) ──
+    @property
+    def pcseq(self):
+        """Day 92 -- recurrent HDC context-state + delta-rule readout (reservoir computing in the
+        FHRR substrate).  The non-backprop sequence model: a CONTINUOUS running state carries the
+        whole sentence-so-far -- curing the discrete-tuple walk's long-range blindness and its
+        degenerate loop -- while a single linear readout predicts the next token by local error
+        (Widrow-Hoff / predictive coding, NOT backprop).  Validated Day 92 (day92_pc_seq: a
+        long-range dependency 9 tokens back recovered 100% vs a bigram's 0%).  Lazy; shares the
+        organism's ck word-identity space.  Feed via org.observe_sequence; read via predict_next /
+        generate_predictive.  Honest: strong at context, weaker than a bigram at raw local
+        next-token -- meant to be COMPOSED (PoE) with a local model, not used alone for fluency."""
+        pc = getattr(self, '_pcseq', None)
+        if pc is None:
+            from ikigai.cognition.predictive_sequence import PredictiveSequenceModel
+            ck = self.unified.ck if getattr(self, 'unified', None) is not None else self.flat.ck
+            pc = PredictiveSequenceModel(ck, decay=0.9, lr=0.5, seed=92)
+            self._pcseq = pc
+        return pc
+
+    def observe_sequence(self, sequences, epochs=1):
+        """Learn next-token structure from example sequences by the delta rule (no backprop).
+        `sequences` = iterable of token lists.  Returns vocab size."""
+        return self.pcseq.learn(list(sequences), epochs=epochs)
+
+    def predict_next(self, context, k=5):
+        """Top-k next tokens for a context by the readout's resonance -- context-aware, carrying
+        the long-range dependency a bigram structurally cannot."""
+        return self.pcseq.predict(list(context), k=k)
+
+    def build_decodable_meaning(self, n_factors=6, per_factor=32):
+        """Learn locality-preserving factor codebooks over the accumulated co-occurrence
+        embeddings so meaning becomes an EMITTABLE code (capacity per_factor**n_factors).  Call
+        after observe_meaning, before consolidate.  Returns #words coded."""
+        return self.factored.build_decodable(n_factors=n_factors, per_factor=per_factor)
+
+    def emit_meaning(self, tokens, k=3):
+        """Compose the meaning of `tokens` in code space and emit the grounded word(s) -- the
+        generative primitive of the decodable meaning codebook (no HV-decode, no resonator
+        d-bound).  Needs build_decodable_meaning() first."""
+        return self.factored.emit(tokens, k=k)
+
+    # ── Day 91: THE ONE MEMORY -- SDM + VSA + RHC + factored + cache, unified ──
+    @property
+    def mem(self):
+        """The ONE memory.  Not another store on the pile -- a single object over the shared ck
+        that unifies every mechanism the organism has:
+          .similar/.neighbors/.observe/.emit -> factored meaning (semantic, SDM/LSH, past the knee)
+          .relate/.query                       -> unified roles (relational, VSA bind)
+          .fact/.derive/.knows                 -> RHC fact store (exact knowledge, 1e9)
+          .kv_put/.kv_get                      -> in-substrate RHC cache (episodic key->value)
+          .remember/.recall/.mood/.people/.goals -> the autobiographical self (people, goals,
+                                                    emotions, events)
+        One entry, one persistence (rides in .ikg beside the substrate), lazy + DEFAULT.  Additive
+        facade -- the reasoning path is untouched, so risky regression tests are unaffected."""
+        m = getattr(self, '_mem', None)
+        if m is None:
+            from ikigai.cognition.unified_memory import UnifiedMemory
+            m = UnifiedMemory(self)
+            self._mem = m
+        return m
+
+    def meaning_hv(self, word):
+        """The decodable meaning HV of a word (JET ENGINE: block-partitioned, decodes at C**K)."""
+        return self.factored.meaning_hv(word)
+
+    def decode_meaning(self, hv, k=3):
+        """Read a meaning HV back to word(s) by independent per-block decode (no joint d-bound) --
+        decode-at-1e9 with similarity preserved.  Needs build_decodable_meaning() first."""
+        return self.factored.decode_hv(hv, k=k)
+
+    # ── Day 91: RHC-addressed exact stores (fact store + in-substrate cache) ──────
+    @property
+    def rhc(self):
+        """Residue-HDC block store shared by the RHC-addressed stores (capacity ~6.69e9 at
+        fixed d).  Lazy; the exact/decodable 1e9 address engine."""
+        r = getattr(self, '_rhc', None)
+        if r is None:
+            from ikigai.cognition.rhc_stores import _BlockRHC
+            r = _BlockRHC(d=self.unified.d if getattr(self, 'unified', None) is not None else 256)
+            self._rhc = r
+        return r
+
+    @property
+    def fact_store(self):
+        """RHC FactStore: knowledge as address-tuples, exact, ~bytes/fact, capacity >= 1e9,
+        consequences derived.  Lazy + persisted into .ikg."""
+        fs = getattr(self, '_fact_store', None)
+        if fs is None:
+            from ikigai.cognition.rhc_stores import FactStore
+            d = self.unified.d if getattr(self, 'unified', None) is not None else 256
+            fs = FactStore(d=d)
+            self._fact_store = fs
+        return fs
+
+    @property
+    def assoc_cache(self):
+        """RHC AssocCache: the anchor cache IN the substrate -- 1e9 collision-free key address
+        space (no external dict) + sparse SDM value store.  Lazy (runtime store)."""
+        ac = getattr(self, '_assoc_cache', None)
+        if ac is None:
+            from ikigai.cognition.rhc_stores import AssocCache
+            ck = self.unified.ck if getattr(self, 'unified', None) is not None else self.flat.ck
+            ac = AssocCache(ck, d=ck.d)
+            self._assoc_cache = ac
+        return ac
+
+    def store_fact(self, subj, rel, obj):
+        """Store a fact as an RHC address-tuple (exact, bytes/fact).  subj/rel/obj are lexicon
+        indices (ints).  Consequences are DERIVED, not stored."""
+        return self.fact_store.add(subj, rel, obj)
+
+    def derive_facts(self, subj, rel, max_hops=8):
+        """Transitive closure of relation `rel` from `subj` over the RHC fact store (derived)."""
+        return self.fact_store.derive_chain(subj, rel, max_hops=max_hops)
+
+    def remember_kv(self, key, value):
+        """Write a key->value into the in-substrate RHC-addressed associative cache."""
+        return self.assoc_cache.put(key, value)
+
+    def recall_kv(self, key, candidates):
+        """Recall a key's value from the in-substrate RHC cache (cleanup vs candidate values)."""
+        return self.assoc_cache.get(key, candidates)
+
+    def consolidate_reach(self, link='isa', d=1024, B=8192, g=16, n_absent=1200, seed=95):
+        """Day-95 -- SLEEP-CONSOLIDATE transitive reasoning ONTO THE SUBSTRATE (the biological
+        answer to F0: reasoning as a flat substrate read, not a python dict walk).  Derives the
+        transitive closure of `link` ONCE from the derive engine's stored atoms and writes each
+        (descendant -> ancestor) pair into a hashed-address distributed store (HashedReachStore),
+        then calibrates an abstain boundary from absent samples.  Afterwards `org.reach_member(x,c)`
+        answers 'is c a transitive ancestor of x' in ONE O(g*d) substrate read, correct-or-abstain.
+        Measured envelope (day95_biological_reach): 100% recall / 1% false-accept to ~18k pairs at
+        ~113us, flat compute, never-wrong.  Returns {pairs, boundary}.  Teach with discover=True
+        first so `link` is mined transitive.  Additive: does not touch the reason() path; no save."""
+        import random as _random
+        from ikigai.cognition.rhc_stores import HashedReachStore
+        eng = self.general_reasoner.derive_engine
+        if not eng.is_transitive(link):
+            return {'pairs': 0, 'boundary': 0.0,
+                    'note': f'"{link}" not mined transitive -- teach(discover=True) first'}
+        store = HashedReachStore(d=d, B=B, g=g, seed=seed)   # own d (decoupled from substrate dim)
+        ents = sorted(getattr(eng, 'entities', []))
+        present = set()
+        for x in ents:
+            chain = eng.transitive_reach(link, x) or []
+            for anc in (c.replace(' ', '') for c in chain[1:]):
+                store.write_pair(x, anc); present.add((x, anc))
+        rng = _random.Random(seed)
+        absent = []
+        for _ in range(n_absent * 4):
+            if len(absent) >= n_absent or len(ents) < 2:
+                break
+            x = rng.choice(ents); c = rng.choice(ents)
+            if x != c and (x, c) not in present:
+                absent.append((x, c))
+        store.calibrate(absent)
+        self._reach_store = store
+        self._reach_link = link
+        return {'pairs': store.n, 'boundary': round(store.boundary, 4)}
+
+    def _struct_sig(self, key):
+        """Deterministic ORTHOGONAL role phasor for a structural key (rank / slot / position).
+        Orthogonal, NOT an FPE magnitude code: a slot identity ('rank 2') must not leak into its
+        neighbour ('rank 3'); FPE encodes proximity=similarity and makes unbind recover the wrong
+        payload (measured: 50% vs 100%).  Same key -> same signature in every modality."""
+        import numpy as _np
+        d = self.unified.d
+        r = _np.random.default_rng(abs(hash(('struct', str(key)))) % (2 ** 31))
+        return _np.exp(1j * r.uniform(-_np.pi, _np.pi, d)).astype(_np.complex64)
+
+    def structure_bind(self, key, payload):
+        """Day-95 -- bind a PAYLOAD to a STRUCTURAL key (rank / role / position) in one superposed
+        associative bank: bank += bind(sig(key), key(payload)).  CROSS-MODAL BY CONSTRUCTION: any
+        modality that independently DERIVES the same structural key recalls the same payload -- the
+        address is the derived STRUCTURE, never the surface token.  This is the real mechanism behind
+        cross-modal transfer (day95_crossmodal_real: a trait taught via a text-derived rank is
+        recovered 480/480 through space- and music-derived ranks).  Default-on: bank created lazily.
+        Returns the number of bindings held."""
+        import numpy as _np
+        bank = getattr(self, '_struct_bank', None)
+        if bank is None:
+            bank = _np.zeros(self.unified.d, dtype=_np.complex64)
+        pk = _np.asarray(self.unified.ck.key(str(payload).strip().lower()), _np.complex64).reshape(-1)
+        self._struct_bank = (bank + self._struct_sig(key) * pk).astype(_np.complex64)
+        self._struct_n = getattr(self, '_struct_n', 0) + 1
+        return self._struct_n
+
+    def structure_recall(self, key, candidates):
+        """Day-95 -- recall the payload bound to a structural key: unbind the bank by the key's role
+        phasor and CLEAN UP over `candidates` (cosine argmax over the substrate codebook).  Returns
+        the best candidate, or None if nothing is bound yet.  A wrongly-derived key yields the wrong
+        payload -- this can genuinely fail, which is what makes it a real test."""
+        import numpy as _np
+        bank = getattr(self, '_struct_bank', None)
+        if bank is None or not candidates:
+            return None
+        v = (bank * _np.conj(self._struct_sig(key))).astype(_np.complex64)
+        best, bc = -1e9, None
+        for c in candidates:
+            ck = _np.asarray(self.unified.ck.key(str(c).strip().lower()), _np.complex64).reshape(-1)
+            s = float(_np.real(_np.vdot(ck, v)))
+            if s > best:
+                best, bc = s, c
+        return bc
+
+    def reach_member(self, x, c, link='isa'):
+        """Day-95 -- is `c` a transitive ancestor of `x`?  ONE flat substrate read of the
+        consolidated reach bank (O(g*d)); below the calibrated boundary -> abstains (returns False),
+        a calibrated <1% false-accept floor (NOT dict-exact 0-wrong).  DEFAULT-ON: auto-consolidates
+        the closure on first use so it just works with no setup; re-consolidates when new facts were
+        taught since (dirty flag).  Returns None only if `link` is not (yet) mined transitive."""
+        st = getattr(self, '_reach_store', None)
+        if st is None or getattr(self, '_reach_dirty', False):
+            info = self.consolidate_reach(link)
+            if not info.get('pairs'):
+                return None                                   # link not transitive yet
+            st = self._reach_store
+            self._reach_dirty = False
+        return bool(st.member(x, c))
+
+    # ---------------- Day-96: FACTS AS PACKED ADDRESS-LISTS (the fact store that scales) --------
+    _MERGE_MAX_EDGES = 200_000        # Day-99: above this, merging back through strings is a 132+ MB
+                                      # spike -- refuse loudly rather than OOM or drop data silently.
+
+    def ingest_addressed(self, triples, rel_hint=None, replace=False):
+        """Day-96 -- ingest bulk facts into the PACKED ADDRESS-LIST store (`AddressFactStore`), the
+        production form of the Day-90 idea: a fact is THREE INDICES over a shared lexicon, not three
+        strings.  The running derive engine (`compositional.py`) keeps each fact as python STRINGS in
+        a dict -- measured 662 B/edge (4.16M Wikidata p279 edges -> 3.5 GB RSS).  Here the same edges
+        cost 5.3 B (measured, day96_address_store), with byte-identical closures.
+
+        What is free stays free: WORDS are computed addresses (`ck`, 0 B), CONSEQUENCES are derived
+        (0 B), the SDM substrate is FIXED.  The ONLY thing that costs bytes is the atomic edge --
+        which combinations are TRUE -- and that is Shannon-irreducible (~4 B/edge).  Superposition
+        cannot dodge it: bundle capacity is ~O(d) before crosstalk (this project measured the wall
+        three ways), so N facts held readably need d ~ N and the vector IS the bytes.
+
+        Use for BULK/graph knowledge (taxonomies, KGs).  Additive: does not touch reason().
+
+        Day-99 -- MERGES by default (replace=False).  It used to do `self._addr_facts = st`, i.e. a
+        second call silently DESTROYED the first corpus (measured: ingest A, then ingest B, and A's
+        edges were gone -- alpha->beta True then False).  Silent destruction is the Day-97 failure
+        wearing a different mask, and it would have broken Day-100/101 outright ("feed a corpus, then
+        feed another").  Now the old edges are streamed back out and rebuilt together with the new.
+
+        The merge is BOUNDED: streaming a huge store back to strings costs 662 B/edge (4.16M edges =
+        3.5 GB), which is the exact cost the packed form exists to avoid.  Above _MERGE_MAX_EDGES it
+        REFUSES rather than OOM the machine or silently drop data -- rebuild from source, or pass
+        replace=True to deliberately start a new store."""
+        from ikigai.cognition.address_store import AddressFactStore
+        new = list(triples)
+        old = getattr(self, '_addr_facts', None)
+        if old is not None and not replace:
+            n_old = int(getattr(old, 'n_edges', 0) or 0)
+            if n_old > self._MERGE_MAX_EDGES:
+                raise ValueError(
+                    f'ingest_addressed: refusing to merge into a store of {n_old:,} edges '
+                    f'(> _MERGE_MAX_EDGES={self._MERGE_MAX_EDGES:,}). Streaming it back to strings '
+                    f'would cost ~{n_old * 662 / 1e9:.1f} GB. Rebuild from source with the full '
+                    f'triple list, or pass replace=True to start a NEW store (discarding this one).')
+            try:
+                old_edges = list(old.edges())
+            except Exception as e:
+                raise ValueError(
+                    'ingest_addressed: cannot merge -- the existing store has no surface strings '
+                    '(loaded with surface=False?), so its edges cannot be streamed back out. '
+                    f'Rebuild from source or pass replace=True. ({type(e).__name__}: {e})')
+            new = old_edges + new
+        st = AddressFactStore(keep_lexicon=True)
+        info = st.build(new)
+        st.compact_lexicon(keep_strings=True)
+        self._addr_facts = st
+        # Day-99 -- new bulk facts invalidate the consolidated SDM banks, exactly as ingest_triples
+        # already flags. Without this, ancestors()/reach_member() answer from a STALE bank after a
+        # bulk ingest (measured: ingest_triples set both flags, ingest_addressed set neither).
+        self._reach_dirty = True
+        self._anc_dirty = True
+        self._learn_epoch = int(getattr(self, '_learn_epoch', 0)) + 1     # bulk knowledge arrived
+        # WIRE IT INTO THE DERIVE PATH (not a side store): atoms()/atom() fall through to it, so
+        # reason() / transitive_reach() derive over these edges WITHOUT the 290-B/entry anchor
+        # cache or the string mining-index ever holding them. This is what makes the packed store
+        # the organism's fact store rather than a demo.
+        self.general_reasoner.derive_engine.attach_addresses(st)
+        return {'entities': info['entities'], 'edges': info['edges'],
+                'b_per_edge': round(st.bytes_per_edge(), 2),
+                'edge_mb': round(st.edge_bytes() / 1e6, 1),
+                'functional': info['functional'], 'csr': info['csr']}
+
+    @property
+    def facts(self):
+        """The packed address-list fact store (None until ingest_addressed / load_facts)."""
+        return getattr(self, '_addr_facts', None)
+
+    def lookup(self, entity, relation, source=None, trust=1.0, bind=True):
+        """Day-98 -- THE RETRIEVAL ORGAN.  A fixed-size mind cannot HOLD the whole world; a brain
+        offloads to the world and fetches on demand.  So does this: lookup FETCHES a fact from an
+        EXTERNAL store (the long tail the core does not carry -- e.g. an mmap'd AddressFactStore on
+        disk, or any object with objects_of/str_of), BINDS it into working memory so the organism
+        can REASON with it (not merely echo it), and ABSTAINS on a miss -- it never fabricates the
+        tail.  Breadth is thereby decoupled from core size, permanently.  Provenance/trust ride with
+        the answer (calibration extended to sources).  Returns {answer, source, trust, abstained}.
+
+        bind=True writes the fetched fact into the live derive engine's working set, so a SUBSEQUENT
+        derive can compose it with core knowledge (fetch -> bind -> reason)."""
+        st = source if source is not None else self.facts
+        ent = str(entity).strip().lower()
+        rel = str(relation).strip().lower()
+        if st is None or not hasattr(st, 'objects_of'):
+            return {'answer': None, 'abstained': True, 'source': None, 'trust': 0.0}
+        try:
+            ids = st.objects_of(ent, rel)
+        except Exception:
+            ids = None
+        if not ids:                                          # MISS -> abstain, never fabricate
+            return {'answer': None, 'abstained': True,
+                    'source': getattr(st, 'name', 'external'), 'trust': 0.0}
+        vals = []
+        for i in ids:
+            v = st.str_of(i) if (hasattr(st, 'str_of') and isinstance(i, int)) else i
+            if v:
+                vals.append(v)
+        if bind:                                             # bind into working memory -> DERIVABLE
+            # must go through the ingest path (cache + record), not a bare _record: transitive_reach
+            # / atom() read the anchor cache, so a bare _record would store the fact but leave it
+            # underivable.  This is what makes fetch -> bind -> REASON actually compose.
+            self.ingest_triples([(ent, rel, v) for v in vals], discover=False)
+        return {'answer': vals[0] if len(vals) == 1 else vals,
+                'source': getattr(st, 'name', 'external'), 'trust': float(trust),
+                'abstained': False}
+
+    def reach_addressed(self, rel, x):
+        """Exact transitive closure over the packed fact store, as surface strings.  Byte-identical
+        to the string-dict walk (verified on the full 4.16M-edge Wikidata backbone) at ~1/125th the
+        RAM.  Returns None if no address store has been built/loaded."""
+        st = getattr(self, '_addr_facts', None)
+        if st is None:
+            return None
+        return {st.str_of(i) for i in st.transitive_reach(rel, x)}
+
+    def save_facts(self, path):
+        """Persist the fact store to ONE binary file (packed arrays).  Disk grows; RAM does not."""
+        st = getattr(self, '_addr_facts', None)
+        return None if st is None else st.save(path)
+
+    def load_facts(self, path, mmap=True, surface=True):
+        """FLAT ACCESS (the north star): mmap the fact store from disk, so the store grows on DISK
+        and RAM stays flat -- only the pages a closure walk actually touches are ever resident.
+        The SDM substrate is fixed; the facts live on disk; RAM never grows with knowledge.
+
+        Day-97: every array is now a zero-copy memoryview over the mmap (day-96's load() copied the
+        surface blob back into RAM, which quietly defeated the mmap for the largest array in the
+        store -- measured RSS delta +32.9 MB, now +0.0).  Measured on the full 4.16M-edge Wikidata
+        backbone: 3.58M entities, lexicon 104.0 -> 53.0 MB on disk and ~0 MB resident.
+
+        surface=False -> REASONING-ONLY: no surface table at all (0 bytes of vocabulary).  Ids in,
+        ids out, closures still exact.  This is Day-90's "surface strings only at the edges" taken
+        to its limit -- the form that goes on the phone."""
+        from ikigai.cognition.address_store import AddressFactStore
+        self._addr_facts = AddressFactStore.load(path, mmap=mmap, surface=surface)
+        self.general_reasoner.derive_engine.attach_addresses(self._addr_facts)
+        return self._addr_facts
+
+    def lexicon_report(self):
+        """MEASURED footprint of the fact store, split by what it is FOR: the edges (the actual
+        knowledge), the str->id lookup (needed to ENTER a query), and the surface table (needed only
+        to EMIT text).  No asserted constants -- every number here is read off the live arrays."""
+        st = getattr(self, '_addr_facts', None)
+        if st is None:
+            return None
+        n = max(1, st.n_entities)
+        return {'entities': st.n_entities, 'edges': st.n_edges,
+                'edge_mb': round(st.edge_bytes() / 1e6, 1),
+                'b_per_edge': round(st.bytes_per_edge(), 2),
+                'lookup_mb': round(st.lookup_bytes() / 1e6, 1),
+                'surface_mb': round(st.surface_bytes() / 1e6, 1),
+                'b_per_entity': round(st.lexicon_bytes() / n, 2),
+                'reasoning_only': not st.keep_lexicon}
+
+    @staticmethod
+    def _anc_norm(w):
+        """One normalization for subject/ancestor/query so SDM write-word == read-word (else the
+        subject's Kanerva locations don't line up and recall returns crosstalk)."""
+        return str(w).strip().lower().replace(' ', '')
+
+    def consolidate_ancestors(self, link='isa', d=512, k=64, seed=96, max_M=65536):
+        """Day-96 -- MULTI-VALUE recall: list ALL transitive ancestors of x (a SET readout, the
+        harder sibling of reach_member's yes/no).  REUSES the production flat_memory.VSASDM bank
+        directly: each descendant's ancestor keys are bundled at the subject address key(x); recall
+        reads that superposition and CLEANS UP over the ANCESTOR-UNIVERSE codebook (one batched
+        cosine matmul -- a leaf can't be an ancestor, so candidates are bounded) above a
+        PRECISION-PRESERVING calibrated floor -> correct-or-abstain (drops uncertain ancestors,
+        never emits a false one).  Enumeration cost O(U*d) codebook cleanup; flat yes/no membership
+        stays O(g*d) via reach_member -- two complementary faculties over the same closure.
+        Measured (experiments/nl/day96_multivalue_ancestors.py): good regime prec~0.99 / rec~1.0
+        with a MEASURED capacity law SNR ~ sqrt(M/N_subjects) -- the bank M is auto-sized to the
+        subject count.  Additive: does not touch reason(); no save.
+        Returns {subjects, universe, pairs, M, boundary}."""
+        import math as _math
+        import random as _random
+        import numpy as _np
+        from ikigai.cognition.flat_memory import VSASDM, ComputedKey
+        eng = self.general_reasoner.derive_engine
+        if not eng.is_transitive(link):
+            return {'subjects': 0, 'pairs': 0,
+                    'note': f'"{link}" not mined transitive -- teach(discover=True) first'}
+        nz = self._anc_norm
+        closure, universe = {}, set()
+        for x in sorted(getattr(eng, 'entities', [])):
+            # Day-99 -- REVERTED my own "fix" here. I rerouted this through derive_ancestry claiming
+            # ancestors() "abstained on facts the organism plainly held". WRONG: it abstained because
+            # the test never taught it that `isa` is transitive (discover=False), and refusing to
+            # assert x-isa-z without a LEARNED transitive rule is the calibration working. The gate
+            # above is correct, transitive_reach is already the Day-96 BFS over ALL parents, so the
+            # reroute bought nothing and rested on a misdiagnosis. The miner is fine: measured
+            # chains=4 acyclic=4 conf=1.00 -> rule promoted -> is_transitive True on clean data.
+            chain = eng.transitive_reach(link, x) or []
+            anc = [nz(c) for c in chain[1:]]
+            anc = [c for c in anc if c and c != nz(x)]
+            if anc:
+                closure[nz(x)] = anc
+                universe.update(anc)
+        N = max(1, len(closure))
+        M = min(int(max_M), 1 << max(13, int(_math.ceil(_math.log2(24 * N)))))   # M ~ 24N, pow2
+        ck = ComputedKey(d=d, seed=seed)
+        sdm = VSASDM(d=d, M=M, k=k, seed=seed)
+        n_pairs = 0
+        for xn, anc in closure.items():
+            ax = ck.key(xn)
+            for c in anc:
+                sdm.write(ax, ck.key(c), word=xn)             # bundle at subject address
+                n_pairs += 1
+        uni = sorted(universe)
+        cb = (_np.stack([ck.key(u) for u in uni]).astype(_np.complex64)
+              if uni else _np.zeros((0, d), _np.complex64))
+        uni_ix = {u: i for i, u in enumerate(uni)}
+        rng = _random.Random(seed)
+        subs = list(closure.keys())
+        absent, tries = [], 0
+        while len(absent) < 3000 and tries < 80000 and uni:
+            tries += 1
+            xs = rng.choice(subs); c = rng.choice(uni)
+            if c in closure[xs] or c == xs:
+                continue
+            v = sdm.read(ck.key(xs), xs)
+            absent.append(float(_np.real(_np.vdot(cb[uni_ix[c]], v)) / d))
+        boundary = (float(_np.percentile(absent, 99.9)) * 1.15) if absent else 0.0
+        self._anc_ck, self._anc_sdm, self._anc_cb = ck, sdm, cb
+        self._anc_uni, self._anc_boundary, self._anc_link = uni, boundary, link
+        self._anc_dirty = False
+        return {'subjects': N, 'universe': len(uni), 'pairs': n_pairs, 'M': M,
+                'boundary': round(boundary, 4)}
+
+    def ancestors(self, x, link='isa', topk=None):
+        """Day-96 -- return the SET of transitive ancestors of x, recalled THROUGH the substrate:
+        read x's bundled superposition off the production VSASDM and clean up over the ancestor
+        universe above the precision-preserving floor (correct-or-abstain).  DEFAULT-ON:
+        auto-consolidates on first use, re-consolidates when facts changed (dirty flag).  Returns a
+        list sorted by substrate confidence (strongest ancestor first), [] if none survive the
+        floor, or None if `link` is not (yet) mined transitive.  `topk` caps the set.  This is set
+        enumeration; reach_member(x, c) is the flat yes/no test over the same closure."""
+        import numpy as _np
+        if getattr(self, '_anc_sdm', None) is None or getattr(self, '_anc_dirty', False):
+            if not self.consolidate_ancestors(link).get('pairs'):
+                return None
+        ck, sdm, cb, uni = self._anc_ck, self._anc_sdm, self._anc_cb, self._anc_uni
+        if cb.shape[0] == 0:
+            return []
+        xn = self._anc_norm(x)
+        v = sdm.read(ck.key(xn), xn)
+        sims = _np.real(cb @ _np.conj(v)) / ck.d
+        out = []
+        for i in _np.argsort(-sims):
+            if uni[i] == xn:
+                continue
+            if sims[i] < self._anc_boundary:
+                break                                          # sorted -> rest are below floor too
+            out.append(uni[i])
+            if topk and len(out) >= topk:
+                break
+        return out
+
+    def semantic_sim(self, w1, w2):
+        """Day 91 -- distributional word similarity from the LIVE meaning store, scale-first.
+        Prefers the FACTORED code store (readable past the ~20k superposition knee, to billions);
+        falls back to `unified.cooccur` (the persisted body, folded in at Pack 117-118) and then
+        the standalone `flat` bank.  Returns cos in [-1,1] or None when no store has both words.
+        This is the source a MEANING critic reads (generate_structured / _make_critic), so
+        generation sources readable meaning at scale rather than a saturated bundle."""
+        fm = getattr(self, '_factored', None)
+        if fm is not None:
+            try:
+                s = fm.sim(w1, w2)
+            except Exception:
+                s = None
+            if s is not None:
+                return s
+        s = None
+        u = getattr(self, 'unified', None)
+        if u is not None:
+            try:
+                s = u.similarity(w1, w2)
+            except Exception:
+                s = None
+        if s is None and getattr(self, 'flat', None) is not None:
+            try:
+                s = self.flat.similarity(w1, w2)
+            except Exception:
+                s = None
+        return s
 
     def flat_recall(self, word):
         """Adaptive reconstructive readout of a word's meaning."""
@@ -5313,8 +7762,162 @@ class IkigaiOrganism:
         return self.taxonomy.chain_to_root(word)
 
     def pos_similarity(self, w1, w2):
-        """How grammatically similar (same POS)?"""
+        """How grammatically similar (same POS)?  Day-103 SUBSTRATE-FIRST: read the
+        POS fingerprints from the PERSISTED unified roles (pos_left/pos_right, written
+        through by ground_text) so distributional grammar survives save/reload; fall
+        back to the in-RAM GrammarGrounding dict when the substrate has none yet."""
+        s = self._pos_similarity_substrate(w1, w2)
+        if s is not None:
+            return s
         return self.grammar.pos_similarity(w1, w2)
+
+    def _pos_similarity_substrate(self, w1, w2):
+        """Cosine of two words' left/right POS fingerprints recalled from the unified
+        substrate. Day-103 -- POS is the FIRST channel migrated to the ONE persistent
+        memory (Prince's "everything gets written to SDM"): ground_text write_relation's
+        each word's idf-weighted context bundle into pos_left/pos_right, keyed by the
+        shared ComputedKey, so it rides unified.save_ikg and is one identity across the
+        organism. Returns None when neither role holds a usable fingerprint for both
+        words (caller falls back to the RAM dict)."""
+        import numpy as _np
+        u = getattr(self, 'unified', None)
+        if u is None:
+            return None
+        sc = []
+        for role in ('pos_left', 'pos_right'):
+            try:
+                a = u.recall(w1, role); b = u.recall(w2, role)
+            except Exception:
+                continue
+            if a is None or b is None:
+                continue
+            a = _np.asarray(a).reshape(-1); b = _np.asarray(b).reshape(-1)
+            n = float(_np.linalg.norm(a) * _np.linalg.norm(b))
+            if n > 1e-6:
+                sc.append(float(_np.real(_np.vdot(a, b)) / n))
+        if not sc:
+            return None
+        return sum(sc) / len(sc)
+
+    _AFFECT_POS = '__aff_pos__'
+    _AFFECT_NEG = '__aff_neg__'
+
+    def _ensure_affect_role(self):
+        """Day-103 EMOTION CHANNEL setup. The 8 Kanerva banks are HUGELY imbalanced
+        (b_lang ~4.3e10 mass vs b_ground ~1.4e7 -- 3000x). A runtime 'affect' role
+        defaults to the OVERLOADED b_lang, where a low-information affect signal drowns
+        below the crosstalk floor -- which is exactly why 5 earlier affect encodings
+        failed. Route it to the LIGHTEST bank (b_ground, where sensory already lives
+        and works), and re-establish that mapping on EVERY construction AND after
+        load_ikg (the role->bank map is not itself persisted, only bank CONTENT is --
+        MEASURED: content survives, mapping is lost, remapping recovers full
+        discrimination). Idempotent, best-effort."""
+        u = getattr(self, 'unified', None)
+        if u is None:
+            return
+        try:
+            r2b = getattr(u, '_role_to_bank', None)
+            if isinstance(r2b, dict):
+                r2b['affect'] = 'b_ground'
+            u.ensure_role('affect')
+        except Exception:
+            pass
+
+    def _affect_now(self):
+        """Current felt valence from the neuroendocrine BODY: reward/novelty (dopamine
+        above tonic baseline 0.5) minus stress (cortisol above baseline 0.1). Real
+        physiology -- the same body that gates learning plasticity -- no authored
+        emotion lexicon. Clamped [-1, 1]."""
+        try:
+            da = self.body.get('dopamine'); co = self.body.get('cortisol')
+            v = 0.0
+            if da is not None:
+                v += float(getattr(da, 'level', 0.5)) - 0.5
+            if co is not None:
+                v -= float(getattr(co, 'level', 0.1)) - 0.1
+            return max(-1.0, min(1.0, v))
+        except Exception:
+            return 0.0
+
+    def _write_affect(self, tokens):
+        """Day-103 -- 'every emotion gets written to SDM'. When the body felt something
+        (|valence| past a small floor), bind that felt sign onto the KNOWN-entity topic
+        tokens of the experience, CATEGORICALLY (relate -> a pos/neg exemplar, the same
+        symbolic mechanism sensory uses in the same light bank), in the PERSISTENT
+        'affect' role. The organism remembers how it FELT about what it processed; it
+        rides save_ikg. Only writes on emotionally-significant calls (novelty/stress),
+        so routine neutral queries pay nothing -- biology remembers what moved it.
+        Bounded, best-effort."""
+        u = getattr(self, 'unified', None)
+        if u is None or not tokens:
+            return
+        v = self._affect_now()
+        if abs(v) < 0.05:
+            return                       # neutral -> nothing felt
+        self._ensure_affect_role()
+        target = self._AFFECT_POS if v > 0 else self._AFFECT_NEG
+        try:
+            ents = getattr(self.general_reasoner.derive_engine, 'entities', None) or set()
+        except Exception:
+            ents = set()
+        n = 0
+        for w in set(tokens):
+            if w in ents:
+                for _ in range(8):       # reinforce so the trace clears the read floor
+                    try:
+                        u.relate(w, 'affect', target)
+                    except Exception:
+                        break
+                n += 1
+            if n >= 4:
+                break
+
+    def recall_affect(self, word):
+        """How did the organism FEEL about `word`? Signed valence in [-1, 1] recalled
+        from the persistent 'affect' role (positive = felt good, negative = felt bad),
+        or None if never felt / too weak to trust. Survives save/reload -- lived
+        emotion is part of the ONE memory now."""
+        u = getattr(self, 'unified', None)
+        if u is None:
+            return None
+        self._ensure_affect_role()       # re-establish bank mapping (not persisted)
+        try:
+            res = u.query(word, 'affect', [self._AFFECT_POS, self._AFFECT_NEG])
+        except Exception:
+            return None
+        if not res:
+            return None
+        label, score = res[0], float(res[1])
+        if score < 0.1:                  # below this = crosstalk noise, never really felt
+            return None
+        return score if label == self._AFFECT_POS else -score
+
+    def _pos_write_through(self, tokens):
+        """Day-103 -- mirror THIS sentence's POS fingerprints into the persistent
+        unified substrate (roles pos_left/pos_right). Distributional grammar becomes
+        part of the ONE memory that rides save_ikg instead of dying in an unpersisted
+        dict. Only the sentence's own tokens are written (bounded, not O(vocab) per
+        call). Keyed by the shared ComputedKey. Best-effort; never raises into read."""
+        import numpy as _np
+        u = getattr(self, 'unified', None)
+        g = getattr(self, 'grammar', None)
+        if u is None or g is None:
+            return
+        try:
+            if 'pos_left' not in set(getattr(u, 'roles', []) or []):
+                u.ensure_role('pos_left')
+            if 'pos_right' not in set(getattr(u, 'roles', []) or []):
+                u.ensure_role('pos_right')
+        except Exception:
+            return
+        for w in set(tokens):
+            for role, ctx in (('pos_left', g._left_ctx.get(w)),
+                              ('pos_right', g._right_ctx.get(w))):
+                if ctx is not None:
+                    try:
+                        u.write_relation(w, role, _np.asarray(ctx, _np.complex64))
+                    except Exception:
+                        pass
 
     def pos_neighbors(self, word, k=5):
         """k words playing same grammatical role."""
@@ -5342,18 +7945,6 @@ class IkigaiOrganism:
             return reply, t
         loop.respond_to = respond_to
         return loop
-
-    def generate_frame(self, prompt='', max_len=15, mode='context_biased', **kwargs):
-        """Direct generation via frame_relax (Day-83 audit rewire: the old
-        SentenceGenerator Markov walk over being.lexicon is superseded by the
-        data-free grammatical generator, Pack 313). Returns text string.
-        (Day 90: renamed from `generate` -> `generate_frame` so `generate` is the one
-        unified grounded-walk generation entry; this frame-relax path is the `mode='frame'`
-        variant.)"""
-        seed = kwargs.get('seed', abs(hash(prompt)) % (2**31) if prompt else 0)
-        r = self.say_frame(message=None, seed=seed,
-                           n_iters=kwargs.get('n_iters', 6))
-        return r['text'] if r else ''
 
     def trace(self):
         """Returns last reasoning trace."""
@@ -5399,9 +7990,12 @@ class IkigaiOrganism:
         }
 
     def __repr__(self):
+        # Day-97 FIX: this read s['wm_vars'], a key status() has never returned -- the legacy
+        # ReasoningEngine working-memory counter, retired in the Day-83 audit.  repr(org) raised
+        # KeyError for every caller since.  Report what the organism actually has.
         s = self.status()
         return (f"<IkigaiOrganism tick={s['tick']} eps={s['n_episodes']} "
-                f"wm={s['wm_vars']}>")
+                f"vocab={s['being_vocab']} beliefs={s['n_beliefs']} age={s['being_age']}>")
 
     # ── Persistence ──────────────────────────────────────────────────────
 
@@ -5489,6 +8083,24 @@ def organism():
     if _DEFAULT is None:
         _DEFAULT = IkigaiOrganism()
     return _DEFAULT
+
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+# Day-99 -- register the faculties that compete inside `org(x)`.
+#
+# Deliberately OUTSIDE the class body and in a deliberately unhelpful order (abstain first, learn
+# last -- the reverse of any sensible authored priority). If the outcome ever depends on this
+# order, the organism is not deciding and the gate day99_one_api_order_invariant will say so.
+# Adding a capability to the organism is adding a line here: no ladder to edit, no mode to pick.
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+IkigaiOrganism._register_faculty('abstain', IkigaiOrganism._fac_abstain)
+IkigaiOrganism._register_faculty('speak',   IkigaiOrganism._fac_speak)
+IkigaiOrganism._register_faculty('wonder',  IkigaiOrganism._fac_wonder)
+IkigaiOrganism._register_faculty('answer',  IkigaiOrganism._fac_answer)
+IkigaiOrganism._register_faculty('solve',   IkigaiOrganism._fac_solve)
+IkigaiOrganism._register_faculty('learn',   IkigaiOrganism._fac_learn)
+IkigaiOrganism._register_faculty('analogy', IkigaiOrganism._fac_analogy)   # Day-102 wire
+IkigaiOrganism._register_faculty('identity', IkigaiOrganism._fac_identity)  # Day-104: knows who it is
 
 
 def ask(text):
