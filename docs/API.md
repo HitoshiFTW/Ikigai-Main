@@ -194,10 +194,17 @@ from the data when there's enough evidence (`ingest_triples(..., discover=True)`
 a small handful of edges may not trip it yet -- `benchmark.py` step 5 shows the
 discovery, step 3 shows the multi-hop reach.
 
-> **Front-door note:** the plain-English front door `org(x)` currently grounds
-> **direct** facts; multi-hop is reached through the derive engine as shown above.
-> Routing NL questions like "is a cat an animal" through the transitive engine is
-> tracked work, not yet wired.
+**Through the front door too:** once a relation is discovered-transitive, `org(x)`
+derives the closure for you -- no need to call the engine directly:
+
+```python
+org('is a cat an animal')     # -> derives the chain, answers 'cat isa animal'
+org('what is a cat')          # -> states the derived ancestors, not just the direct parent
+org('is a cat a rock')        # -> not derivable; it won't assert a false yes
+```
+
+This is emergent: the organism only does it for relations it *learned* are
+transitive, and every word of the answer is a token from the derived chain.
 
 ### `org.learn_language(n=500000)`
 

@@ -103,9 +103,10 @@ org.knows('paris')          # {'capital_of': ['france'], ...}
 org.knows('flarbnak')       # {}  -- unknown entity, invents nothing
 ```
 
-> Multi-hop derivation (following an is-a chain across many links) is done by the
-> derive engine and is what `benchmark.py` step 3 verifies -- see
-> [docs/API.md](docs/API.md#multi-hop-derivation) for how to call it directly.
+> Multi-hop derivation (following an is-a chain across many links) works through
+> `org(x)` too -- `org('is a cat an animal')` derives the chain and answers, and
+> `benchmark.py` step 3 verifies the same reach. See
+> [docs/API.md](docs/API.md#multi-hop-derivation).
 
 `org(x)` always returns a dict: `chose` (which faculty won: `answer` / `abstain` /
 `learn` / `solve` / `analogy` / `identity`), `result` (the reply), and `learned`

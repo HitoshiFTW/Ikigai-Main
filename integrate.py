@@ -2939,6 +2939,44 @@ class IkigaiOrganism:
                 return None, ent, rel
         return cur, ent, rel
 
+    def _derive_transitive_answer(self, question, ent, rel, tok):
+        """Day-105 -- MULTI-HOP through the front door, emergently.  `rel` is a
+        DISCOVERED-transitive relation (`is_transitive` == a LEARNED rule, never an
+        authored link list), so its direct atom is only the FIRST hop.  Derive the
+        closure from `ent` on demand (`transitive_reach` == derive-not-store) and
+        answer from it:
+
+          - the question NAMES a target node (a token that is a member of the derived
+            chain, or a known engine entity, other than the subject): answer the polar
+            ask by CLOSURE MEMBERSHIP.  A derivable ancestor is affirmed with every
+            content token taken from the derived chain (grounded -> nothing invented);
+            a target that is NOT derivable is not asserted (return None -> the caller's
+            own honest read-out stands, no fabricated 'yes').
+          - no named target ('what is a X'): STATE the derived ancestors.
+
+        No regex, no yes/no template, no relation table: transitivity is learned, the
+        target is entity membership, and every word is the chain's own token."""
+        eng = self.general_reasoner.derive_engine
+        chain = eng.transitive_reach(rel, ent)
+        if not chain or len(chain) < 2:
+            return None
+        ancestors = chain[1:]
+        ents = getattr(eng, 'entities', None) or set()
+        allowed = set(tok(' '.join(chain)))          # only the derived chain's own tokens
+        targets = [t for t in tok(question)
+                   if t != ent and (t in ancestors or t in ents)]
+        if targets:
+            y = targets[-1]
+            if y in ancestors:                       # a derivable ancestor -> affirm (multi-hop yes)
+                text = f"{ent} {rel} {y}"
+                grounded = all(t in allowed for t in tok(text))
+                return {'text': text, 'grounded': grounded, 'fact': (ent, rel, y),
+                        'hops': ancestors.index(y) + 1}
+            return None                              # named a target it cannot derive -> don't assert
+        text = f"{ent} {rel} " + ', '.join(ancestors)
+        grounded = all(t in allowed for t in tok(text))
+        return {'text': text, 'grounded': grounded, 'fact': (ent, rel, ancestors[-1])}
+
     def answer(self, question, depth=None, explain=False):
         """Day-85 #4 -- GROUNDED, FAITHFUL read-out.  Derive the answer from the
         substrate (ask_derive, exact) and state it in words whose every content
@@ -2989,6 +3027,13 @@ class IkigaiOrganism:
         if not ans:
             return {'text': "i don't know", 'grounded': True, 'fact': None}
         rel = (rels[-1] if isinstance(rels, list) and rels else (rels or '')).strip()
+        # Day-105 -- the direct atom is only hop 1 of a LEARNED-transitive relation. Derive
+        # the closure through the front door so org(x) answers multi-hop natively (yes/no
+        # ancestor + 'what is a X' chain), emergently -- see _derive_transitive_answer.
+        if rel and self.general_reasoner.derive_engine.is_transitive(rel):
+            mh = self._derive_transitive_answer(question, ent, rel, tok)
+            if mh is not None:
+                return mh
         text = f"{ent} {rel} {ans}".strip()
         allowed = set(tok(f"{ent} {rel} {ans}"))
         grounded = all(t in allowed for t in tok(text))     # nothing invented
