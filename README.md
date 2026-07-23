@@ -2,7 +2,8 @@
 
 > **New here?** Start with the **[Quickstart](QUICKSTART.md)** (talk to it in 30
 > seconds), then **[How it works](docs/HOW_IT_WORKS.md)** (the ideas in plain
-> English) and the **[API reference](docs/API.md)**.
+> English), the **[Architecture](docs/ARCHITECTURE.md)** (how the parts interact —
+> for collaborators), and the **[API reference](docs/API.md)**.
 
 A digital organism whose knowledge is **composed, not stored**. Facts are held
 in a fixed-size hyperdimensional substrate; reasoning is *derived* on demand

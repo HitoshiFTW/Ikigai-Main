@@ -131,6 +131,7 @@ pretend otherwise. What Ikigai does that they can't:
 - **Learn continually, for life** -- no retraining, no forgetting.
 - **Stay tiny** -- constant RAM no matter how much it knows.
 
-Want to see it? [Quickstart](../QUICKSTART.md). Want the exact API?
+Want to see it? [Quickstart](../QUICKSTART.md). Want to see how the pieces fit
+together in code? [Architecture](ARCHITECTURE.md). Want the exact API?
 [API reference](API.md). Want the measured numbers and limitations?
 [README](../README.md).
