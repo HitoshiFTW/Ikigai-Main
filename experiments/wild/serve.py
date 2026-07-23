@@ -54,13 +54,21 @@ class WildOrganism:
         # ONCE (curiosity-gated frames, self-consistency -- no hardcoded templates).  A RAM-safe
         # chunk on a 1GB box; frames then PERSIST into the wild file, so later boots skip this.
         try:
-            has_frames = bool(getattr(getattr(self.org, 'surface', None), 'templates', None))
-            if not has_frames and os.path.exists(os.path.join(ROOT, 'eng_sentences.tsv.bz2')):
+            sr = getattr(self.org, 'surface', None)
+            has_frames = bool(getattr(sr, 'templates', None))
+            # Day-105: a wild organism persisted BEFORE construction generalization has frames but
+            # no generic {R}-slot frame -> it can't teach a never-seen relation one-shot. Re-run the
+            # exposure once to install it (then it persists into the wild file, later boots skip).
+            has_generic = bool(getattr(sr, 'generic_frames', None))
+            if (not has_frames or not has_generic) and os.path.exists(os.path.join(ROOT, 'eng_sentences.tsv.bz2')):
                 n = int(os.environ.get('IKIGAI_GRAMMAR_N', '500000'))
-                print(f'learning language from exposure ({n} sentences)...', flush=True)
+                why = 'learning language from exposure' if not has_frames else \
+                      'upgrading grammar: installing generalized construction'
+                print(f'{why} ({n} sentences)...', flush=True)
                 t0 = time.time()
                 self.org.learn_language(n=n)
-                print(f'  grammar: {len(self.org.surface.templates)} relations in '
+                print(f'  grammar: {len(self.org.surface.templates)} relations, '
+                      f'generic={bool(getattr(self.org.surface, "generic_frames", None))} in '
                       f'{time.time()-t0:.1f}s', flush=True)
         except Exception as _e:
             print(f'  grammar induction skipped: {type(_e).__name__}: {_e}', flush=True)
