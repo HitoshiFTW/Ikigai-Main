@@ -216,9 +216,14 @@ def run_http(port):
             self.wfile.write(body)
 
         def do_OPTIONS(self):
+            # CORS preflight. Browsers REQUIRE Access-Control-Allow-Methods on the preflight for a
+            # JSON POST -- without it the browser blocks the request (the site showed "couldn't
+            # reach the organism" while curl worked, because curl doesn't enforce CORS).
             self.send_response(204)
             self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
             self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+            self.send_header('Access-Control-Max-Age', '86400')
             self.end_headers()
 
         def do_GET(self):
