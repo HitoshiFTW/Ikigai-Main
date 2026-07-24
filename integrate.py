@@ -4168,9 +4168,18 @@ class IkigaiOrganism:
         else:
             _roots = [r for r in (_anc['roots'] if _anc else []) if r in chain] or [chain[-1]]
             _mids = [c for c in chain if c not in _roots]
-            if _mids:
+            # Day-106: cap the classification list. A dense ingested taxonomy (ConceptNet) gives a
+            # topic HUNDREDS of transitive ancestors (with noisy deep paths -- "dog isa cocaine");
+            # a description wants the nearest few, not the whole closure. Show the first handful; if
+            # the closure is deep/noisy, drop the unreliable "ultimately root" (chain[-1] is arbitrary
+            # over a dense DAG) rather than assert a wrong root.
+            _mids = _mids[:6]
+            deep = len(chain) > 10
+            if _mids and not deep:
                 sents = [f"The {topic} is {self._and_list([art(c) for c in _mids])}, "
                          f"and ultimately {self._and_list([art(r) for r in _roots])}."]
+            elif _mids:
+                sents = [f"The {topic} is {self._and_list([art(c) for c in _mids])}."]
             else:
                 sents = [f"The {topic} is {self._and_list([art(r) for r in _roots])}."]
 
@@ -6233,7 +6242,7 @@ class IkigaiOrganism:
 
     def load_ikg(self, path=None):
         """Replace self.unified with substrate loaded from .ikg file.
-        Path defaults to env IKIGAI_IKG or organism.ikg next to this module.
+        Path defaults to env IKIGAI_IKG or c:/neuroseed/organism.ikg.
         """
         import os
         from ikigai.cognition.multirole_memory import MultiRoleMemory
