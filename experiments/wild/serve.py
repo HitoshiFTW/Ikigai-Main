@@ -118,7 +118,11 @@ class WildOrganism:
             learned = len(r.get('learned') or []) if chose == 'learn' else 0
             self._learned += learned
 
-            TRUSTED = {'answer', 'solve', 'analogy', 'abstain', 'learn', 'identity', 'generate'}
+            # speak is TRUSTED (Day-106): it describes GROUNDED knowledge (derived relations,
+            # correct-or-abstain via _targeted_ungrounded) -- this is how ingested knowledge
+            # ("what is a dog" -> "a canine, a mammal...") reaches the public door. Pre-Day-100 it
+            # could salad, hence the old suppression; the grounding fixes make it safe to show.
+            TRUSTED = {'answer', 'solve', 'analogy', 'abstain', 'learn', 'identity', 'generate', 'speak'}
             raw_chose, raw_ans = chose, ans
             if chose == 'learn':
                 ans = 'Got it -- ' + (ans or 'learned that.')
