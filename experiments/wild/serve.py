@@ -77,6 +77,26 @@ class WildOrganism:
                       f'{time.time()-t0:.1f}s', flush=True)
         except Exception as _e:
             print(f'  grammar induction skipped: {type(_e).__name__}: {_e}', flush=True)
+        # KNOWLEDGE (Day-106): re-ingest ConceptNet at boot if absent. write_substrate=False facts
+        # do NOT survive the wild persist round-trip, so re-add them every boot (cheap, idempotent,
+        # ~15s for 99k). Relation/question words already excluded in the file (they broke abstain).
+        try:
+            cn = os.path.join(ROOT, 'data_conceptnet_clean.tsv')
+            if os.path.exists(cn) and not (self.org.knows('dog') or {}).get('isa'):
+                trip = []
+                with open(cn, encoding='utf-8') as f:
+                    for line in f:
+                        p = line.rstrip('\n').split('\t')
+                        if len(p) == 3:
+                            trip.append((p[0], p[1], p[2]))
+                if trip:
+                    print(f'ingesting {len(trip):,} knowledge facts (ConceptNet)...', flush=True)
+                    t0 = time.time()
+                    self.org.ingest_triples(trip, discover=True, write_substrate=False)
+                    print(f'  knowledge: knows(dog).isa={bool((self.org.knows("dog") or {}).get("isa"))} '
+                          f'in {time.time()-t0:.1f}s', flush=True)
+        except Exception as _e:
+            print(f'  knowledge ingest skipped: {type(_e).__name__}: {_e}', flush=True)
         self._born = time.time()
         self._n = 0            # interactions since boot
         self._learned = 0      # facts acquired from strangers

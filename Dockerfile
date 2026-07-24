@@ -21,6 +21,10 @@ COPY organism.ikg .
 #     (curiosity-gated frames) on first boot; the learned frames then persist to /data.
 COPY eng_sentences.tsv.bz2 .
 
+# 3c) broad knowledge (ConceptNet, filtered ~99k facts) -- re-ingested at boot (write_substrate=
+#     False facts don't survive the persist round-trip), so the organism knows common things.
+COPY data_conceptnet_clean.tsv .
+
 # 4) the wild LIFE (everything it learns from strangers) lives on a mounted volume,
 #    so it survives container restarts.  These env vars point the server at /data.
 ENV IKIGAI_STATE=/data/wild_organism.ikg \
