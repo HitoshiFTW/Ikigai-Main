@@ -4120,7 +4120,10 @@ class IkigaiOrganism:
         chain = []
         for link in ('isa', 'subclassof'):
             if eng.is_transitive(link):
-                chain = [c.replace(' ', '') for c in (eng.transitive_reach(link, topic) or [])[1:]]
+                # Day-106: bound the closure for DESCRIPTION. A dense ingested taxonomy (ConceptNet)
+                # gives a topic thousands of transitive ancestors; describing needs only the nearest
+                # few, and the full walk cost ~0.5s/query (sense() runs speak on every call). Cap it.
+                chain = [c.replace(' ', '') for c in (eng.transitive_reach(link, topic, max_depth=12) or [])[1:]]
                 if chain:
                     break
         # Day-99 -- the single-parent while-loop that used to live here dropped half the taxonomy of
@@ -4237,10 +4240,12 @@ class IkigaiOrganism:
                 sents.append(_subj + ' ' + body + '.')
             sents.extend(standalone)
 
-        # LENGTH: elaborate on referenced entities (grounded)
+        # LENGTH: elaborate on referenced entities (grounded).  Day-106: cap the number elaborated
+        # and bound each entity's closure -- a dense ingested taxonomy makes this loop the dominant
+        # per-query cost (each value carries thousands of ancestors + attributes); a few is enough.
         if elaborate:
-            for (r, val) in inh:
-                vc = [c.replace(' ', '') for c in (eng.transitive_reach('isa', val) or [])[1:]]
+            for (r, val) in inh[:5]:
+                vc = [c.replace(' ', '') for c in (eng.transitive_reach('isa', val, max_depth=8) or [])[1:]]
                 sub = None
                 for rr in attr_rels:
                     x = eng.atom(rr, val)
