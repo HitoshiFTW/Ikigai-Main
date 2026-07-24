@@ -60,15 +60,20 @@ class WildOrganism:
             # no generic {R}-slot frame -> it can't teach a never-seen relation one-shot. Re-run the
             # exposure once to install it (then it persists into the wild file, later boots skip).
             has_generic = bool(getattr(sr, 'generic_frames', None))
-            if (not has_frames or not has_generic) and os.path.exists(os.path.join(ROOT, 'eng_sentences.tsv.bz2')):
+            # Day-106: the CoherentGenerator (open-ended generation) is NOT persisted -> refit at
+            # boot from the corpus (bounded, RAM-safe). learn_language fits it as its last step.
+            has_gen = getattr(self.org, '_coherent_gen', None) is not None
+            if (not has_frames or not has_generic or not has_gen) and os.path.exists(os.path.join(ROOT, 'eng_sentences.tsv.bz2')):
                 n = int(os.environ.get('IKIGAI_GRAMMAR_N', '500000'))
                 why = 'learning language from exposure' if not has_frames else \
-                      'upgrading grammar: installing generalized construction'
+                      ('upgrading grammar: installing generalized construction' if not has_generic else
+                       'fitting the coherent generator')
                 print(f'{why} ({n} sentences)...', flush=True)
                 t0 = time.time()
                 self.org.learn_language(n=n)
                 print(f'  grammar: {len(self.org.surface.templates)} relations, '
-                      f'generic={bool(getattr(self.org.surface, "generic_frames", None))} in '
+                      f'generic={bool(getattr(self.org.surface, "generic_frames", None))}, '
+                      f'generator={getattr(self.org, "_coherent_gen", None) is not None} in '
                       f'{time.time()-t0:.1f}s', flush=True)
         except Exception as _e:
             print(f'  grammar induction skipped: {type(_e).__name__}: {_e}', flush=True)
@@ -113,7 +118,7 @@ class WildOrganism:
             learned = len(r.get('learned') or []) if chose == 'learn' else 0
             self._learned += learned
 
-            TRUSTED = {'answer', 'solve', 'analogy', 'abstain', 'learn', 'identity'}
+            TRUSTED = {'answer', 'solve', 'analogy', 'abstain', 'learn', 'identity', 'generate'}
             raw_chose, raw_ans = chose, ans
             if chose == 'learn':
                 ans = 'Got it -- ' + (ans or 'learned that.')

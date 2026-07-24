@@ -904,6 +904,42 @@ class IkigaiOrganism:
             return (0.97, self.identity_statement())
         return None
 
+    def _fac_generate(self, text):
+        """Day-106 -- OPEN-ENDED GENERATION.  When the input is not a question (so it does not
+        want a grounded answer) and not a learnable fact, and the organism has read enough language
+        to generate, it can SPEAK a coherent, novel, grounded-by-construction sentence.
+
+        This is the GENERATE faculty -- fluent, distinct from the correct-or-abstain ANSWER path.
+        Two guards keep it from hijacking the factual door: (1) it declines any QUESTION, decided
+        by the LEARNED interrogatives (no authored list), so answer/abstain own every question;
+        (2) its confidence is capped MODEST, so a grounded answer/speak/learn always outranks it --
+        it wins only when nothing grounded competes (an open prompt like 'say something').  The
+        wild public door keeps it suppressed (correct-or-abstain), so deployment stays honest."""
+        if not isinstance(text, str):
+            return None
+        g = self.coherent_gen
+        if g is None:
+            return None
+        try:
+            if self._is_question(text) is True:
+                return None                                   # a question wants an answer, not free speech
+        except Exception:
+            return None
+        try:
+            if self.surface.extract_verified(text) is not None:
+                return None                                   # a tellable fact -> learn owns it, don't speak over it
+        except Exception:
+            pass
+        try:
+            said = g.generate(n=1)
+            toks = str(said).split()
+            if len(toks) < 3:
+                return None
+            conf = min(0.45, 0.30 + 0.20 * g.coherence(['<s>'] + toks + ['</s>']))
+            return (conf, said)
+        except Exception:
+            return None
+
     def be(self, x, act=True):
         """Day-99 -- THE ONE CALL.  `org.be(x)` -- or just `org(x)`.
 
@@ -2773,8 +2809,51 @@ class IkigaiOrganism:
         stats = self._induce_grammar_stats(sentences)      # function words + interrogatives (EMERGENT)
         rep = self.induce_surface_verified(sentences)      # fact-grounded frames (distant supervision)
         cur = self.curiosity_frames(sentences)             # curiosity + self-consistency (broad)
+        gen = self.fit_generator(sentences)                # Day-106: coherent open-ended generation
         return {'grammar': stats, 'verified': rep,
-                'curiosity': {k: v['func'] for k, v in cur.items()}}
+                'curiosity': {k: v['func'] for k, v in cur.items()},
+                'generator': gen}
+
+    def fit_generator(self, sentences):
+        """Day-106 -- fit the CoherentGenerator (open-ended, grounded, coherent sentence
+        generation) on raw sentences.  Tokenized to alpha words, 4-10 long; the generator learns
+        emergent type-signatures + grounded transitions + the composed-prefix re-rank that lifts
+        coherent generation from ~9% to ~100% (`experiments/audit/day106_coherent_gen.py`).  This
+        is the GENERATE path -- fluent, distinct from the correct-or-abstain ANSWER path."""
+        import re as _re
+        from ikigai.cognition.coherent_generator import CoherentGenerator
+        # cap the fit corpus: bounds RAM (vocab-sized signature tables) so a 1GB box can refit at
+        # boot without OOM. Quality saturates far below this -- the day-106 gate hit 100% on 4k.
+        cap = 60000
+        seqs = []
+        for s in sentences:
+            toks = _re.findall(r'[a-z]+', str(s).lower())
+            if 4 <= len(toks) <= 10:
+                seqs.append(toks)
+                if len(seqs) >= cap:
+                    break
+        if not seqs:
+            return {'fitted': False, 'sequences': 0}
+        self._coherent_gen = CoherentGenerator().fit(seqs)
+        return {'fitted': True, 'sequences': len(seqs), 'vocab': len(self._coherent_gen.vocab)}
+
+    @property
+    def coherent_gen(self):
+        """Lazy CoherentGenerator: if the organism has read language but the generator wasn't
+        fit yet, fit it from the corpus once (same source learn_language uses)."""
+        g = getattr(self, '_coherent_gen', None)
+        if g is not None and getattr(g, '_fitted', False):
+            return g
+        return None
+
+    def generate(self, n=1, seed=None):
+        """Generate `n` coherent, grounded, NOVEL sentences (open-ended generation).  Requires the
+        generator to have been fit (learn_language / fit_generator).  Fluent, not fact-checked --
+        use answer()/org(x)'s answer faculty for grounded facts, this to GENERATE."""
+        g = self.coherent_gen
+        if g is None:
+            return [] if n != 1 else ''
+        return g.generate(n=n, seed=seed)
 
     def _induce_grammar_stats(self, sentences):
         """LEARN the closed-class grammar of the language FROM THE CORPUS -- no authored lists.
@@ -8172,6 +8251,7 @@ IkigaiOrganism._register_faculty('solve',   IkigaiOrganism._fac_solve)
 IkigaiOrganism._register_faculty('learn',   IkigaiOrganism._fac_learn)
 IkigaiOrganism._register_faculty('analogy', IkigaiOrganism._fac_analogy)   # Day-102 wire
 IkigaiOrganism._register_faculty('identity', IkigaiOrganism._fac_identity)  # Day-104: knows who it is
+IkigaiOrganism._register_faculty('generate', IkigaiOrganism._fac_generate)  # Day-106: open-ended coherent generation
 
 
 def ask(text):
