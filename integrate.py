@@ -2846,14 +2846,18 @@ class IkigaiOrganism:
             return g
         return None
 
-    def generate(self, n=1, seed=None):
+    def generate(self, n=1, seed=None, about=None):
         """Generate `n` coherent, grounded, NOVEL sentences (open-ended generation).  Requires the
         generator to have been fit (learn_language / fit_generator).  Fluent, not fact-checked --
-        use answer()/org(x)'s answer faculty for grounded facts, this to GENERATE."""
+        use answer()/org(x)'s answer faculty for grounded facts, this to GENERATE.
+
+        `about=<word>` -- generate ABOUT a topic (seeds the sentence with it).  A first semantic
+        handle: the sentence is on-subject and grammatical, though its predicate may still drift
+        (full sentence-meaning is the open problem)."""
         g = self.coherent_gen
         if g is None:
             return [] if n != 1 else ''
-        return g.generate(n=n, seed=seed)
+        return g.generate(n=n, seed=seed, topic=about)
 
     def _induce_grammar_stats(self, sentences):
         """LEARN the closed-class grammar of the language FROM THE CORPUS -- no authored lists.

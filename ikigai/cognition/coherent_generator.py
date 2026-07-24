@@ -116,8 +116,22 @@ class CoherentGenerator:
         """resonance of a sentence's type-shape with the taught manifold (a coherence score)."""
         return float((self.MAN @ self._shape(seq)).max()) if self._fitted else 0.0
 
-    def _rollout(self, rs, max_steps=14):
-        prefix = [S]
+    def _topic_seed(self, topic):
+        """Seed a generation ABOUT a topic: the shortest attested opening that mentions the topic
+        word ('the {topic}' if that context has successors, else '{topic}'), so the sentence is
+        literally about it and continues by grounded transitions.  This is topical MEANING done the
+        way this generator can hold it -- SEED, don't steer (steering can't inject a word the
+        grounded successors don't offer).  None if the topic never begins a sentence in the data."""
+        t = str(topic).lower()
+        if t not in self.vidx:
+            return None
+        for seed in ([S, 'the', t], [S, t]):
+            if (len(seed) >= 2 and tuple(seed[-2:]) in self.succ2) or seed[-1] in self.succ1:
+                return list(seed)
+        return None
+
+    def _rollout(self, rs, max_steps=14, prefix=None):
+        prefix = list(prefix) if prefix else [S]
         for _ in range(max_steps):
             ctx = tuple(prefix[-2:]) if len(prefix) >= 2 else None
             cand = self.succ2.get(ctx) if ctx else None
@@ -134,16 +148,17 @@ class CoherentGenerator:
             if nxt == E: break
         return prefix
 
-    def generate(self, n=1, pool=8, novel=True, max_steps=14, seed=None):
+    def generate(self, n=1, pool=8, novel=True, max_steps=14, seed=None, topic=None):
         """Generate `n` coherent sentences. For each: propose a small POOL of grounded,
         composed-re-ranked rollouts, then pick the highest-coherence NOVEL one (safest-novel).
         Returns list of strings (or one string if n==1)."""
         if not self._fitted:
             return [] if n != 1 else ''
         rs = np.random.RandomState() if seed is None else np.random.RandomState(seed)
+        tseed = self._topic_seed(topic) if topic is not None else None   # generate ABOUT the topic
         out = []
         for _ in range(n):
-            cands = [self._rollout(rs, max_steps) for _ in range(max(1, pool))]
+            cands = [self._rollout(rs, max_steps, prefix=tseed) for _ in range(max(1, pool))]
             scored = sorted(cands, key=lambda c: -self.coherence(c))
             pick = None
             if novel:
