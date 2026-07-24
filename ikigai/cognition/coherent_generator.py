@@ -50,6 +50,10 @@ class CoherentGenerator:
                 if i < len(s) - 1: sig[self.vidx[t]] += atom[self.vidx[s[i + 1]]]
         sig /= (np.linalg.norm(sig, axis=1, keepdims=True) + 1e-9)
         self.sig = sig
+        self.atom = atom                                  # word IDENTITY (for subject-specific state)
+        from collections import Counter as _C
+        _freq = _C(t for s in seqs for t in s)
+        self._func = set(w for w, _ in _freq.most_common(60))   # function words (frequency head)
         # grounded successor index (attested transitions only)
         self.succ2 = defaultdict(set); self.succ1 = defaultdict(set)
         for s in seqs:
@@ -81,17 +85,22 @@ class CoherentGenerator:
         i = self.vidx.get(tok)
         return self.sig[i] if i is not None else None
 
-    def _state(self, prefix):
+    def _state(self, prefix, gamma=0.6):
         v = np.zeros(self.d, np.float32)
         for j in range(min(self.W, len(prefix))):
             sg = self._sig_of(prefix[-1 - j])
-            if sg is not None: v += self.R[j] * sg
-        g = np.zeros(self.d, np.float32)
+            if sg is not None: v += self.R[j] * sg          # recency-positional TYPE (grammar)
+        g = np.zeros(self.d, np.float32)                    # global TYPE bundle (topic-shape)
+        h = np.zeros(self.d, np.float32)                    # global IDENTITY bundle (the specific subject)
         for t in prefix:
-            sg = self._sig_of(t)
-            if sg is not None: g += sg
+            i = self.vidx.get(t)
+            if i is None: continue
+            g += self.sig[i]
+            if t not in self._func: h += self.atom[i]        # keep the CONTENT words themselves present
         ng = np.linalg.norm(g)
         if ng > 0: v += self.alpha * (g / ng)
+        nh = np.linalg.norm(h)
+        if nh > 0: v += gamma * (h / nh)                     # so the whole sentence stays about the subject
         nv = np.linalg.norm(v)
         return v / nv if nv > 0 else v
 
