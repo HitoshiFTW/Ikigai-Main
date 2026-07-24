@@ -56,16 +56,18 @@ class CoherentGenerator:
             for i in range(len(s) - 1):
                 self.succ1[s[i]].add(s[i + 1])
                 if i >= 1: self.succ2[(s[i - 1], s[i])].add(s[i + 1])
-        # position roles + composed-prefix attention memory (state -> next)
+        # position roles + composed-prefix attention memory (state -> next).
+        # SUBSAMPLE the (sequence, position) pairs to max_keys BEFORE computing states -- building a
+        # state per position first would materialize ~N_positions x d floats (100s of MB) and OOM a
+        # small box. We only ever keep max_keys, so only compute that many.
         self.R = rs.choice([-1.0, 1.0], size=(self.W, self.d)).astype(np.float32)
         self.POS = rs.choice([-1.0, 1.0], size=(14, self.d)).astype(np.float32)
-        K, V = [], []
-        for s in seqs:
-            for t in range(len(s) - 1):
-                K.append(self._state(s[:t + 1])); V.append(self.vidx[s[t + 1]])
-        K = np.stack(K).astype(np.float32); V = np.array(V)
-        if len(K) > self.max_keys:
-            keep = rs.choice(len(K), size=self.max_keys, replace=False); K = K[keep]; V = V[keep]
+        pairs = [(si, t) for si, s in enumerate(seqs) for t in range(len(s) - 1)]
+        if len(pairs) > self.max_keys:
+            idx = rs.choice(len(pairs), size=self.max_keys, replace=False)
+            pairs = [pairs[i] for i in idx]
+        K = np.stack([self._state(seqs[si][:t + 1]) for (si, t) in pairs]).astype(np.float32)
+        V = np.array([self.vidx[seqs[si][t + 1]] for (si, t) in pairs])
         self.K = K; self.V = V
         # sentence-shape manifold for the coherence critic
         man = [self._shape(s) for s in (seqs if len(seqs) <= self.manifold_n
